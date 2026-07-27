@@ -27,8 +27,18 @@ const ESCAPE_R        = 480;
 const SOFTENING       = 2.2;   // gravitational softening to avoid singular blow-ups
 const VELOCITY_DRAG_SCALE = 0.26; // world-units-of-velocity per world-unit of drag
 const AGE_YEARS_PER_SIMSECOND = 6;
+const STAR_LIFESPAN_K = 60000; // heavier stars burn through this much faster (see createStar)
+
+// at high time-scales a single frame can represent many sim-seconds; integrating
+// the whole thing in one Euler step would let fast-moving bodies tunnel through
+// capture radii or blow up numerically, so we always split big steps into
+// bounded sub-steps instead.
+const MAX_SUBSTEP_BODY      = 0.12;
+const MAX_SUBSTEPS_BODY     = 40;
+const MAX_SUBSTEPS_ASTEROID = 8;
 
 let simTime = 0;
+let simYears = 0;
 
 /* =========================================================================
    RENDERER / SCENE / CAMERA
@@ -75,6 +85,9 @@ function flyCameraTo(targetPos, distance, duration = 1300) {
   cameraTween = { startPos, startTarget, endPos, endTarget: targetPos.clone(), start: performance.now(), duration };
   controls.enabled = false;
 }
+
+let shakeState = null;
+function cameraShake(intensity = 1, duration = 700) { shakeState = { intensity, start: performance.now(), duration }; }
 
 const diskLight = new THREE.PointLight(0xffb066, 6, 900, 1.6);
 scene.add(diskLight);
@@ -451,14 +464,19 @@ function createStar(opts = {}) {
   group.position.copy(pos);
   scene.add(group);
 
+  const mass = opts.mass ?? (2 + Math.random() * 20);
+  const isHighMass = mass > 11;
+  const lifespan = STAR_LIFESPAN_K / Math.pow(mass, 1.6) + 3000; // heavier stars burn out much faster
+
   const obj = {
     id: idCounter++, type: 'star', name: opts.name || randomName('star'),
     mesh: group, core, glow,
-    mass: opts.mass ?? (2 + Math.random() * 20), radius: size,
+    mass, radius: size,
     velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.85 + Math.random() * 0.3),
-    tempK, status: 'stable', age: 0,
+    tempK, status: 'stable', age: opts.age ?? 0,
     trail: createTrail(color.getHex(), 0.4),
     lastLog: {},
+    lifespan, isHighMass, stage: 'main_sequence', lifecycleScale: 1,
   };
   bodies.push(obj);
   registerSelectable(core, obj);
@@ -490,7 +508,7 @@ function createPlanet(opts = {}) {
     mesh: group, core: mesh,
     mass: opts.mass ?? (0.5 + Math.random() * 8), radius: size,
     velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.9 + Math.random() * 0.25),
-    status: 'stable', age: 0,
+    status: 'stable', age: 0, lifecycleScale: 1,
     trail: createTrail(color.getHex(), 0.3),
     lastLog: {},
   };
@@ -517,7 +535,7 @@ function createMoon(opts = {}) {
     mesh: group, core: mesh,
     mass: opts.mass ?? (0.02 + Math.random() * 0.3), radius: size,
     velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
-    status: 'stable', age: 0,
+    status: 'stable', age: 0, lifecycleScale: 1,
     trail: createTrail(color.getHex(), 0.3),
     lastLog: {},
   };
@@ -544,8 +562,37 @@ function createComet(opts = {}) {
     mesh: group, core, glow,
     mass: opts.mass ?? (0.05 + Math.random() * 0.4), radius: size,
     velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 1.1 + Math.random() * 0.5),
-    status: 'stable', age: 0,
+    status: 'stable', age: 0, lifecycleScale: 1,
     trail: createTrail(0x8fe0ff, 0.6, true),
+    lastLog: {},
+  };
+  bodies.push(obj);
+  registerSelectable(core, obj);
+  return obj;
+}
+
+// neutron star: the compact remnant left behind when a high-mass star's core
+// collapses without quite enough mass to form a new black hole
+function createNeutronStar(opts = {}) {
+  const size = opts.size ?? 0.55;
+  const color = 0xdff2ff;
+  const core = new THREE.Mesh(new THREE.SphereGeometry(size, 16, 16), new THREE.MeshBasicMaterial({ color }));
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: starGlowTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 1 }));
+  glow.scale.set(size * 11, size * 11, 1);
+  const group = new THREE.Group();
+  group.add(core); group.add(glow);
+
+  const pos = opts.position || new THREE.Vector3();
+  group.position.copy(pos);
+  scene.add(group);
+
+  const obj = {
+    id: idCounter++, type: 'neutron', name: opts.name || randomName('star') + '-NS',
+    mesh: group, core, glow,
+    mass: opts.mass ?? 6, radius: size,
+    velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
+    status: 'stable', age: 0, lifecycleScale: 1,
+    trail: createTrail(color, 0.5, true),
     lastLog: {},
   };
   bodies.push(obj);
@@ -958,7 +1005,7 @@ function triggerDiskBurst(bh, magnitude) {
   if (!bh) return;
   bh._burst = Math.min((bh._burst || 0) + magnitude, 3.5);
 }
-function spawnEnergyRing(position, color = 0xfff2c8) {
+function spawnEnergyRing(position, color = 0xfff2c8, maxScale = 26, duration = 1500) {
   const geo = new THREE.RingGeometry(1, 1.4, 80);
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false });
   const ring = new THREE.Mesh(geo, mat);
@@ -966,10 +1013,9 @@ function spawnEnergyRing(position, color = 0xfff2c8) {
   ring.position.copy(position);
   scene.add(ring);
   const start = performance.now();
-  const DURATION = 1500, MAX_SCALE = 26;
   function tick() {
-    const t = Math.min((performance.now() - start) / DURATION, 1);
-    const s = 1 + t * MAX_SCALE;
+    const t = Math.min((performance.now() - start) / duration, 1);
+    const s = 1 + t * maxScale;
     ring.scale.set(s, s, 1);
     mat.opacity = 0.85 * (1 - t);
     if (t < 1) requestAnimationFrame(tick); else { scene.remove(ring); geo.dispose(); mat.dispose(); }
@@ -1050,30 +1096,110 @@ function disintegrate(obj, bh) {
 }
 
 /* =========================================================================
+   STAR EVOLUTION — main sequence -> giant phase -> white dwarf / supernova
+   ========================================================================= */
+function updateStarLifecycle(obj) {
+  if (obj.status === 'unstable') return; // tidal stretch already owns the mesh scale right now
+  const frac = obj.age / obj.lifespan;
+
+  if (frac >= 1 && obj.stage !== 'remnant') { triggerSupernova(obj); return; }
+
+  if (frac >= 0.75 && obj.stage === 'main_sequence') {
+    obj.stage = 'giant';
+    obj.lifecycleScale = obj.isHighMass ? 2.6 : 1.9;
+    obj.core.scale.setScalar(obj.lifecycleScale);
+    const giantColor = obj.isHighMass ? 0xff5a3c : 0xff8a5c;
+    obj.core.material.color.set(giantColor);
+    obj.glow.material.color.set(giantColor);
+    obj.glow.scale.set(obj.radius * 7 * obj.lifecycleScale * 1.3, obj.radius * 7 * obj.lifecycleScale * 1.3, 1);
+    logEvent(`${obj.name} has swelled into a ${obj.isHighMass ? 'red supergiant' : 'red giant'}.`, 'info');
+    showBanner(`${obj.name}: ${obj.isHighMass ? 'RED SUPERGIANT' : 'RED GIANT'} PHASE`);
+  }
+}
+
+function triggerSupernova(obj) {
+  if (!obj.isHighMass) {
+    // low-mass stars end quietly as a white dwarf rather than exploding
+    obj.stage = 'remnant';
+    obj.lifecycleScale = 0.35;
+    obj.core.scale.setScalar(obj.lifecycleScale);
+    obj.core.material.color.set(0xeaf6ff);
+    obj.glow.material.color.set(0xeaf6ff);
+    obj.glow.scale.set(obj.radius * 3, obj.radius * 3, 1);
+    obj.status = 'stable';
+    logEvent(`${obj.name} has shed its outer layers and collapsed into a white dwarf.`, 'info');
+    showBanner(`${obj.name}: WHITE DWARF FORMED`);
+    return;
+  }
+
+  obj.stage = 'remnant';
+  logEvent('SUPERNOVA DETECTED', 'critical');
+  logEvent(`STAR ${obj.name} HAS COLLAPSED.`, 'critical');
+  showBanner('SUPERNOVA DETECTED');
+  cameraShake(1.1, 900);
+
+  particleBurst(obj.mesh.position, { count: 180, color: 0xfff2d0, spread: 6, size: 2.6, duration: 2400, growth: 10 });
+  particleBurst(obj.mesh.position, { count: 90, color: 0x9fd4ff, spread: 4, size: 1.8, duration: 2000, growth: 7 });
+  spawnEnergyRing(obj.mesh.position, 0xfff6e0, 55, 2200);
+
+  // the blast wave nudges anything nearby outward
+  for (const b of bodies) {
+    if (b === obj) continue;
+    const diff = b.mesh.position.clone().sub(obj.mesh.position);
+    const d = diff.length();
+    if (d < 150 && d > 0.01) b.velocity.addScaledVector(diff.normalize(), (1 - d / 150) * 22);
+  }
+  // scatter a small debris field of asteroids outward from the blast
+  for (let k = 0; k < 6; k++) {
+    if (!aPos.length) break;
+    const idx = Math.floor(Math.random() * aPos.length);
+    const dir = new THREE.Vector3(Math.random() - 0.5, (Math.random() - 0.5) * 0.4, Math.random() - 0.5).normalize();
+    const p = obj.mesh.position.clone().addScaledVector(dir, 8 + Math.random() * 20);
+    const v = obj.velocity.clone().addScaledVector(dir, 15 + Math.random() * 25);
+    spawnAsteroid(idx, p, v, 0.3 + Math.random() * 1.2, 0.6 + Math.random() * 1.3);
+  }
+
+  const remnantMass = obj.mass * 0.35;
+  if (obj.mass > 17) {
+    createBlackHole({ position: obj.mesh.position.clone(), velocity: obj.velocity.clone(), mass: Math.max(remnantMass * 40, 350), name: obj.name + ' REMNANT' });
+    logEvent(`${obj.name} has collapsed into a new black hole.`, 'critical');
+  } else {
+    createNeutronStar({ position: obj.mesh.position.clone(), velocity: obj.velocity.clone(), mass: remnantMass, name: obj.name + '-NS' });
+    logEvent(`${obj.name} has collapsed into a neutron star.`, 'info');
+  }
+
+  destroyObject(obj, 'supernova', true);
+}
+
+/* =========================================================================
    DESTRUCTION / TIDAL EFFECTS / BANNERS
    ========================================================================= */
-function burstAtDisk(position) {
-  const n = 40;
+function particleBurst(position, opts = {}) {
+  const n = opts.count ?? 40;
+  const spread = opts.spread ?? 4;
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
-    pos[i * 3] = position.x + (Math.random() - 0.5) * 4;
-    pos[i * 3 + 1] = position.y + (Math.random() - 0.5) * 4;
-    pos[i * 3 + 2] = position.z + (Math.random() - 0.5) * 4;
+    pos[i * 3] = position.x + (Math.random() - 0.5) * spread;
+    pos[i * 3 + 1] = position.y + (Math.random() - 0.5) * spread;
+    pos[i * 3 + 2] = position.z + (Math.random() - 0.5) * spread;
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xffdca0, size: 1.4, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+  const mat = new THREE.PointsMaterial({ color: opts.color ?? 0xffdca0, size: opts.size ?? 1.4, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
   const pts = new THREE.Points(geo, mat);
   scene.add(pts);
   const start = performance.now();
+  const duration = opts.duration ?? 1200;
+  const growth = opts.growth ?? 3;
   function fade() {
-    const t = (performance.now() - start) / 1200;
+    const t = (performance.now() - start) / duration;
     mat.opacity = Math.max(0, 1 - t);
-    pts.scale.setScalar(1 + t * 3);
+    pts.scale.setScalar(1 + t * growth);
     if (t < 1) requestAnimationFrame(fade); else { scene.remove(pts); geo.dispose(); mat.dispose(); }
   }
   fade();
 }
+function burstAtDisk(position) { particleBurst(position); }
 function showBanner(text) {
   const el = document.getElementById('notify-banner');
   el.textContent = text;
@@ -1147,10 +1273,11 @@ function stepBody(obj, dt) {
       }
       const k = 1 - r / radii.tidal;
       const stretch = 1 + k * 2.2;
+      const base = obj.lifecycleScale || 1;
       const rel = pos.clone().sub(bh.mesh.position);
       const tangent = new THREE.Vector3(-rel.z, 0, rel.x).normalize();
       obj.mesh.up.copy(tangent);
-      obj.core.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
+      obj.core.scale.set(base / Math.sqrt(stretch), base * stretch, base / Math.sqrt(stretch));
       obj.core.lookAt(pos.clone().add(tangent));
       if (!obj.lastLog.tidal || simTime - obj.lastLog.tidal > 3) {
         logEvent(`Tidal forces increasing on ${obj.name}.`, r < radii.tidal * 0.4 ? 'critical' : 'info');
@@ -1160,7 +1287,7 @@ function stepBody(obj, dt) {
       obj.tidalPercent = Math.min(100 * Math.pow(radii.tidal / Math.max(r, 1), 3), 20);
       if (obj.status === 'unstable' && r > radii.tidal * 1.15) {
         obj.status = 'stable';
-        obj.core.scale.set(1, 1, 1);
+        obj.core.scale.setScalar(obj.lifecycleScale || 1);
         obj.core.rotation.set(0, 0, 0);
       }
     }
@@ -1213,6 +1340,7 @@ function updateInfoPanel() {
     $('info-orbit').textContent = '—';
     $('info-temp').textContent = '—';
     $('info-age').textContent = Math.floor(selected.age).toLocaleString() + ' yrs';
+    $('info-lifecycle').textContent = '—';
     $('info-tidal').textContent = 'EXTREME';
     $('info-influence').textContent = 'SYSTEM-WIDE';
     $('info-status').textContent = 'STABLE';
@@ -1236,6 +1364,7 @@ function updateInfoPanel() {
     $('info-orbit').textContent = tidal ? 'UNSTABLE' : 'STABLE';
     $('info-temp').textContent = '—';
     $('info-age').textContent = '—';
+    $('info-lifecycle').textContent = '—';
     $('info-tidal').textContent = tidal ? 'ELEVATED' : 'NOMINAL';
     $('info-influence').textContent = '—';
     $('info-status').textContent = 'TRACKED';
@@ -1250,13 +1379,22 @@ function updateInfoPanel() {
   $('info-name').textContent = obj.name;
   $('info-type').textContent = obj.type.toUpperCase();
   $('info-parent').textContent = dom ? dom.name : '—';
-  $('info-mass').textContent = obj.mass.toFixed(2) + (obj.type === 'star' ? ' M☉' : ' Mt');
+  $('info-mass').textContent = obj.mass.toFixed(2) + (obj.type === 'star' || obj.type === 'neutron' ? ' M☉' : ' Mt');
   $('info-distance').textContent = (r / 10).toFixed(2) + ' AU';
   $('info-velocity').textContent = (speed / 60).toFixed(2) + 'c';
   const period = ((2 * Math.PI * r) / Math.max(speed, 0.001) / 10).toFixed(1);
   $('info-orbit').textContent = `${obj.status.toUpperCase()} (T≈${period}d)`;
-  $('info-temp').textContent = obj.type === 'star' ? Math.round(obj.tempK).toLocaleString() + ' K' : '—';
+  $('info-temp').textContent = obj.type === 'star' ? Math.round(obj.tempK).toLocaleString() + ' K' : obj.type === 'neutron' ? '~1,000,000,000 K' : '—';
   $('info-age').textContent = Math.floor(obj.age).toLocaleString() + ' yrs';
+  if (obj.type === 'star') {
+    const pct = Math.min(100, (obj.age / obj.lifespan) * 100).toFixed(0);
+    const stageLabel = { main_sequence: 'MAIN SEQUENCE', giant: obj.isHighMass ? 'RED SUPERGIANT' : 'RED GIANT', remnant: 'REMNANT' }[obj.stage];
+    $('info-lifecycle').textContent = `${stageLabel} (${pct}%)`;
+  } else if (obj.type === 'neutron') {
+    $('info-lifecycle').textContent = 'STELLAR REMNANT';
+  } else {
+    $('info-lifecycle').textContent = '—';
+  }
   $('info-tidal').textContent = (obj.tidalPercent ?? 0).toFixed(1) + '%';
   const hs = hillRadius(obj);
   $('info-influence').textContent = hs ? (hs.hr / 10).toFixed(2) + ' AU' : '—';
@@ -1401,9 +1539,21 @@ function animate() {
   if (!CONFIG.paused) {
     const dt = rawDt * CONFIG.timeScale;
     simTime += dt;
-    for (const obj of [...bodies]) stepBody(obj, dt);
-    updateAsteroids(dt);
-    updateFragments(dt);
+    simYears += dt * AGE_YEARS_PER_SIMSECOND;
+
+    // split large steps (high time-scale) into bounded sub-steps so nothing
+    // tunnels through a capture radius or blows up numerically
+    const nBody = Math.min(Math.max(Math.ceil(dt / MAX_SUBSTEP_BODY), 1), MAX_SUBSTEPS_BODY);
+    const subDtBody = dt / nBody;
+    for (let s = 0; s < nBody; s++) for (const obj of [...bodies]) stepBody(obj, subDtBody);
+
+    const nAst = Math.min(nBody, MAX_SUBSTEPS_ASTEROID);
+    const subDtAst = dt / nAst;
+    for (let s = 0; s < nAst; s++) { updateAsteroids(subDtAst); updateFragments(subDtAst); }
+
+    for (const b of [...bodies]) if (b.type === 'star') updateStarLifecycle(b);
+    for (const b of bodies) if (b.type === 'neutron') { const pulse = 1 + 0.3 * Math.sin(simTime * 8 + b.id); b.core.scale.setScalar(pulse); }
+
     for (const bh of blackHoles()) {
       bh.diskMat.uniforms.uTime.value += dt;
       bh._burst = Math.max(0, (bh._burst || 0) - dt * 0.7);
@@ -1415,7 +1565,19 @@ function animate() {
   const dominantForLight = dominantBlackHole();
   if (dominantForLight) diskLight.position.copy(dominantForLight.mesh.position);
 
+  if (shakeState) {
+    const st = Math.min((performance.now() - shakeState.start) / shakeState.duration, 1);
+    if (st >= 1) shakeState = null;
+    else {
+      const decay = (1 - st) * shakeState.intensity;
+      camera.position.x += (Math.random() - 0.5) * decay;
+      camera.position.y += (Math.random() - 0.5) * decay;
+      camera.position.z += (Math.random() - 0.5) * decay;
+    }
+  }
+
   document.getElementById('clock-value').textContent = fmtClock(simTime);
+  document.getElementById('sim-years-value').textContent = Math.floor(simYears).toLocaleString() + ' YEARS';
 
   if (followTarget) {
     const stillExists = bodies.includes(followTarget) || (followTarget.isAsteroid && aAlive[followTarget.index]);

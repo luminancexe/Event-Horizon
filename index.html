@@ -27,6 +27,8 @@
     <div class="sim-clock">
       <span class="clock-label">MISSION TIME</span>
       <span id="clock-value">00:00:00</span>
+      <span class="clock-label clock-label-2">SIMULATION TIME</span>
+      <span id="sim-years-value" class="clock-value-small">0 YEARS</span>
     </div>
     <div class="topbar-actions">
       <button id="btn-help" class="ghost-btn" title="Help">?</button>
@@ -43,6 +45,7 @@
       <div class="section-title">TIME</div>
       <div class="time-buttons" id="time-buttons">
         <button data-speed="0" class="tbtn">II</button>
+        <button data-speed="0.1" class="tbtn">.1x</button>
         <button data-speed="0.25" class="tbtn">.25x</button>
         <button data-speed="0.5" class="tbtn">.5x</button>
         <button data-speed="1" class="tbtn active">1x</button>
@@ -50,6 +53,7 @@
         <button data-speed="5" class="tbtn">5x</button>
         <button data-speed="10" class="tbtn">10x</button>
         <button data-speed="100" class="tbtn">100x</button>
+        <button data-speed="1000" class="tbtn">1000x</button>
       </div>
       <button id="btn-reset" class="wide-btn">&#8635; RESET SIMULATION</button>
     </div>
@@ -113,6 +117,7 @@
         <div class="info-row"><span>ORBIT</span><b id="info-orbit">-</b></div>
         <div class="info-row"><span>TEMPERATURE</span><b id="info-temp">-</b></div>
         <div class="info-row"><span>AGE</span><b id="info-age">-</b></div>
+        <div class="info-row"><span>LIFECYCLE</span><b id="info-lifecycle">-</b></div>
         <div class="info-row"><span>TIDAL FORCE</span><b id="info-tidal">-</b></div>
         <div class="info-row"><span>GRAV. INFLUENCE</span><b id="info-influence">-</b></div>
         <div class="info-row"><span>STATUS</span><b id="info-status">-</b></div>
@@ -168,6 +173,7 @@
         <p>Moons need a planet selected first — they'll be launched into orbit around it.</p>
         <p>Select a star and choose <b>Enter Star System</b> to smoothly fly in and frame its planets and moons. Use <b>Follow</b> / <b>Auto-Orbit</b> to keep the camera locked on any selected object, or <b>Black Hole View</b> to fly back out. The bar under the header shows your current position in the hierarchy.</p>
         <p>Objects that stray too close to a black hole fragment, spiral in, and briefly flare the accretion disk as they're consumed.</p>
+        <p>Time runs from <b>0.1x</b> to <b>1000x</b> — speed it up to watch stars age: they swell into red giants (or supergiants), then quietly fade to a white dwarf, or for massive stars, go supernova and collapse into a neutron star or a brand new black hole.</p>
       </div>
       <button id="btn-help-close" class="wide-btn accent">UNDERSTOOD</button>
     </div>
