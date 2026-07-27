@@ -1208,6 +1208,7 @@ function showBanner(text) {
   showBanner._t = setTimeout(() => el.classList.add('hidden'), 2600);
 }
 function destroyObject(obj, reason, silent = false) {
+  obj._destroyed = true;
   scene.remove(obj.mesh);
   scene.remove(obj.trail.line);
   obj.trail.geo.dispose();
@@ -1221,6 +1222,66 @@ function destroyObject(obj, reason, silent = false) {
       showBanner(obj.type === 'planet' ? 'PLANETARY BODY DESTROYED' : 'TIDAL DISRUPTION COMPLETE');
     }
   }
+}
+
+/* =========================================================================
+   BLACK HOLE INTERACTIONS — pairs that stray close orbit, decay, and merge
+   ========================================================================= */
+function updateBlackHoleInteractions(dt) {
+  const bhs = blackHoles();
+  for (let i = 0; i < bhs.length; i++) {
+    const a = bhs[i];
+    if (a._destroyed) continue;
+    for (let j = i + 1; j < bhs.length; j++) {
+      const b = bhs[j];
+      if (b._destroyed) continue;
+      const d = a.mesh.position.distanceTo(b.mesh.position);
+      const mergeR = (a.visualRadius + b.visualRadius) * 1.15;
+      const decayR = (a.visualRadius + b.visualRadius) * 9;
+      if (d < mergeR) { mergeBlackHoles(a, b); return; }
+      if (d < decayR) {
+        // no natural dissipation exists in simple two-body gravity, so a close
+        // pair gets a gentle artificial drag that shrinks their mutual orbit
+        // over time until they finally spiral together
+        const k = (decayR - d) / decayR;
+        const drag = 1 - k * 0.01 * Math.min(dt, MAX_SUBSTEP_BODY) * 60;
+        a.velocity.multiplyScalar(drag);
+        b.velocity.multiplyScalar(drag);
+      }
+    }
+  }
+}
+
+function mergeBlackHoles(a, b) {
+  if (a._destroyed || b._destroyed) return;
+  const totalMass = a.mass + b.mass;
+  const pos = a.mesh.position.clone().multiplyScalar(a.mass).add(b.mesh.position.clone().multiplyScalar(b.mass)).divideScalar(totalMass);
+  const vel = a.velocity.clone().multiplyScalar(a.mass).add(b.velocity.clone().multiplyScalar(b.mass)).divideScalar(totalMass);
+  const name = 'SGR-' + Math.floor(100 + Math.random() * 900) + ' MERGED';
+
+  logEvent('BLACK HOLE MERGER DETECTED', 'critical');
+  logEvent(`${a.name} and ${b.name} have merged into a single, more massive black hole.`, 'critical');
+  showBanner('BLACK HOLE MERGER DETECTED');
+  cameraShake(1.7, 1300);
+
+  particleBurst(pos, { count: 200, color: 0xd8c8ff, spread: 8, size: 2.8, duration: 2600, growth: 12 });
+  particleBurst(pos, { count: 110, color: 0x9fd4ff, spread: 6, size: 2, duration: 2200, growth: 9 });
+  // a staggered set of rings reads as a rippling gravitational wave, distinct
+  // from the single warm burst used for ordinary tidal disintegration
+  spawnEnergyRing(pos, 0xd8c8ff, 60, 2400);
+  setTimeout(() => spawnEnergyRing(pos, 0x9fd4ff, 72, 2600), 220);
+  setTimeout(() => spawnEnergyRing(pos, 0xffffff, 50, 2000), 440);
+
+  for (const body of bodies) {
+    if (body === a || body === b) continue;
+    const diff = body.mesh.position.clone().sub(pos);
+    const d = diff.length();
+    if (d < 220 && d > 0.01) body.velocity.addScaledVector(diff.normalize(), (1 - d / 220) * 16);
+  }
+
+  destroyObject(a, 'merged', true);
+  destroyObject(b, 'merged', true);
+  createBlackHole({ position: pos, velocity: vel, mass: totalMass, name });
 }
 
 /* =========================================================================
@@ -1245,6 +1306,7 @@ function logEvent(text, level = 'info') {
    PHYSICS STEP FOR MASSIVE BODIES (stars / planets / moons / comets / black holes)
    ========================================================================= */
 function stepBody(obj, dt) {
+  if (obj._destroyed) return;
   const accel = computeAcceleration(obj.mesh.position, obj, bodies);
   obj.velocity.addScaledVector(accel, dt);
   obj.mesh.position.addScaledVector(obj.velocity, dt);
@@ -1545,7 +1607,10 @@ function animate() {
     // tunnels through a capture radius or blows up numerically
     const nBody = Math.min(Math.max(Math.ceil(dt / MAX_SUBSTEP_BODY), 1), MAX_SUBSTEPS_BODY);
     const subDtBody = dt / nBody;
-    for (let s = 0; s < nBody; s++) for (const obj of [...bodies]) stepBody(obj, subDtBody);
+    for (let s = 0; s < nBody; s++) {
+      for (const obj of [...bodies]) stepBody(obj, subDtBody);
+      updateBlackHoleInteractions(subDtBody);
+    }
 
     const nAst = Math.min(nBody, MAX_SUBSTEPS_ASTEROID);
     const subDtAst = dt / nAst;
