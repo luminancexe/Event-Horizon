@@ -86,7 +86,12 @@
       <button id="btn-return" class="wide-btn">&#8962; RETURN TO BLACK HOLE</button>
     </div>
 
-    <div class="panel-hint">Right-click (or long-press) empty space to spawn objects</div>
+    <div class="panel-section">
+      <div class="section-title">CREATE</div>
+      <button id="btn-create" class="wide-btn accent">&#10010; CREATE OBJECT</button>
+    </div>
+
+    <div class="panel-hint">Right-click (or long-press) empty space also opens the creation menu</div>
   </aside>
 
   <!-- RIGHT: INFO + LOG -->
@@ -96,11 +101,15 @@
       <div class="info-body">
         <div class="info-row"><span>NAME</span><b id="info-name">-</b></div>
         <div class="info-row"><span>TYPE</span><b id="info-type">-</b></div>
+        <div class="info-row"><span>ORBITS</span><b id="info-parent">-</b></div>
         <div class="info-row"><span>MASS</span><b id="info-mass">-</b></div>
         <div class="info-row"><span>DISTANCE</span><b id="info-distance">-</b></div>
         <div class="info-row"><span>VELOCITY</span><b id="info-velocity">-</b></div>
         <div class="info-row"><span>ORBIT</span><b id="info-orbit">-</b></div>
+        <div class="info-row"><span>TEMPERATURE</span><b id="info-temp">-</b></div>
+        <div class="info-row"><span>AGE</span><b id="info-age">-</b></div>
         <div class="info-row"><span>TIDAL FORCE</span><b id="info-tidal">-</b></div>
+        <div class="info-row"><span>GRAV. INFLUENCE</span><b id="info-influence">-</b></div>
         <div class="info-row"><span>STATUS</span><b id="info-status">-</b></div>
       </div>
       <button id="btn-delete-obj" class="wide-btn danger">&#10005; DELETE OBJECT</button>
@@ -114,27 +123,27 @@
 
   <!-- CONTEXT MENU -->
   <div id="context-menu" class="hidden">
-    <div class="ctx-item" data-type="planet">+ CREATE PLANET</div>
     <div class="ctx-item" data-type="star">+ CREATE STAR</div>
+    <div class="ctx-item" data-type="planet">+ CREATE PLANET</div>
+    <div class="ctx-item" data-type="moon">+ CREATE MOON (needs selected planet)</div>
     <div class="ctx-item" data-type="asteroid">+ CREATE ASTEROID</div>
     <div class="ctx-item" data-type="comet">+ CREATE COMET</div>
-    <div class="ctx-item" data-type="blackhole">+ CREATE BLACK HOLE (companion)</div>
+    <div class="ctx-item" data-type="blackhole">+ CREATE BLACK HOLE</div>
   </div>
 
-  <!-- CREATE OBJECT DIALOG -->
-  <div id="create-dialog" class="modal hidden">
-    <div class="modal-box panel">
-      <div class="panel-head"><span id="create-title">CREATE OBJECT</span><span class="corner"></span></div>
-      <label class="slider-row"><span>MASS</span><span class="val" id="val-c-mass">10</span>
-        <input type="range" id="slider-c-mass" min="0.1" max="500" step="0.1" value="10"></label>
-      <label class="slider-row"><span>SIZE</span><span class="val" id="val-c-size">1.0</span>
-        <input type="range" id="slider-c-size" min="0.2" max="4" step="0.1" value="1"></label>
-      <label class="slider-row"><span>ORBITAL SPEED &times;</span><span class="val" id="val-c-speed">1.00</span>
-        <input type="range" id="slider-c-speed" min="0" max="2.5" step="0.05" value="1"></label>
-      <div class="modal-actions">
-        <button id="btn-c-cancel" class="wide-btn">CANCEL</button>
-        <button id="btn-c-confirm" class="wide-btn accent">DEPLOY</button>
-      </div>
+  <!-- PLACEMENT PANEL: shown while positioning/launching a new object -->
+  <div id="placement-panel" class="panel hidden">
+    <div class="panel-head"><span id="placement-title">PLACING OBJECT</span><span class="corner"></span></div>
+    <div class="placement-body">
+      <label class="text-row"><span>NAME</span><input type="text" id="input-p-name" maxlength="16"></label>
+      <label class="slider-row"><span>MASS</span><span class="val" id="val-p-mass">10.0</span>
+        <input type="range" id="slider-p-mass" min="0.1" max="500" step="0.1" value="10"></label>
+      <label class="slider-row"><span>SIZE</span><span class="val" id="val-p-size">1.0</span>
+        <input type="range" id="slider-p-size" min="0.2" max="4" step="0.1" value="1"></label>
+      <label class="slider-row hidden" id="row-p-temp"><span>TEMPERATURE</span><span class="val" id="val-p-temp">6000</span>
+        <input type="range" id="slider-p-temp" min="2500" max="30000" step="100" value="6000"></label>
+      <div class="placement-hint">Click to place on a stable orbit, or click-drag to set an exact launch velocity.</div>
+      <button id="btn-p-cancel" class="wide-btn danger">CANCEL PLACEMENT</button>
     </div>
   </div>
 
@@ -147,9 +156,11 @@
       <div class="panel-head"><span>OBSERVATORY GUIDE</span><span class="corner"></span></div>
       <div class="help-body">
         <p><b>Drag</b> — orbit camera &nbsp; <b>Scroll / pinch</b> — zoom</p>
-        <p><b>Click / tap</b> an object — select &amp; inspect</p>
-        <p><b>Right-click / long-press</b> empty space — spawn a new object</p>
-        <p>Watch for stars and planets that stray too close: tidal forces will stretch and consume them.</p>
+        <p><b>Click / tap</b> an object — select &amp; inspect, with velocity vector, orbit path, and sphere of influence shown</p>
+        <p><b>Right-click / long-press</b> empty space, or the <b>Create Object</b> button — open the spawn menu</p>
+        <p>While placing an object: <b>click</b> for an automatic stable orbit, or <b>click-drag</b> to aim and set its exact launch velocity — release to fire it into the field.</p>
+        <p>Moons need a planet selected first — they'll be launched into orbit around it.</p>
+        <p>Watch for objects that stray too close to a black hole: tidal forces will stretch and consume them.</p>
       </div>
       <button id="btn-help-close" class="wide-btn accent">UNDERSTOOD</button>
     </div>

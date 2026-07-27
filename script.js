@@ -6,11 +6,11 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 /* =========================================================================
-   CONFIG
+   CONFIG  (Phase 1: selection, N-body gravity, object creation / drag-launch)
    ========================================================================= */
 const CONFIG = {
   G: 0.6,
-  blackHoleMass: 5000,
+  blackHoleMass: 5000,       // mirrors the primary black hole's mass, kept for the slider
   timeScale: 1,
   paused: false,
   asteroidCount: 400,
@@ -18,11 +18,15 @@ const CONFIG = {
   lensStrength: 1.0,
 };
 
-const HORIZON_RADIUS = 9;          // fixed visual radius of the event horizon
-const CAPTURE_R      = HORIZON_RADIUS * 1.15;
-const TIDAL_R         = HORIZON_RADIUS * 4.2;
-const DRAG_R          = HORIZON_RADIUS * 7.5;
+const BASE_HORIZON   = 9;      // visual radius of a "reference mass" black hole
+const BASE_BH_MASS    = 5000;
+const CAPTURE_MULT    = 1.15;
+const TIDAL_MULT      = 4.2;
+const DRAG_MULT       = 7.5;
 const ESCAPE_R        = 480;
+const SOFTENING       = 2.2;   // gravitational softening to avoid singular blow-ups
+const VELOCITY_DRAG_SCALE = 0.26; // world-units-of-velocity per world-unit of drag
+const AGE_YEARS_PER_SIMSECOND = 6;
 
 let simTime = 0;
 
@@ -49,7 +53,6 @@ controls.minDistance = 20;
 controls.maxDistance = 1400;
 controls.target.set(0, 0, 0);
 
-// lighting: warm point light at the disk to rim-light planets, faint blue fill
 const diskLight = new THREE.PointLight(0xffb066, 6, 900, 1.6);
 scene.add(diskLight);
 scene.add(new THREE.AmbientLight(0x1a2a44, 0.9));
@@ -76,7 +79,6 @@ function makeGlowTexture(inner, outer, size = 128) {
   ctx.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(c);
 }
-
 function makeRingTexture(color, size = 256) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -91,19 +93,17 @@ function makeRingTexture(color, size = 256) {
   ctx.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(c);
 }
-
 const starGlowTex = makeGlowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
+const selectionRingTex = makeRingTexture('rgba(127,217,255,0.95)');
 
 /* =========================================================================
-   BACKGROUND: starfield + nebulae + distant galaxies
+   BACKGROUND: starfield + nebulae
    ========================================================================= */
 function buildStarfield() {
   const N = 7000;
   const pos = new Float32Array(N * 3);
   const col = new Float32Array(N * 3);
-  const palette = [
-    [0.6, 0.75, 1.0], [1, 1, 1], [1, 0.92, 0.7], [1, 0.75, 0.55], [1, 0.55, 0.45],
-  ];
+  const palette = [[0.6, 0.75, 1.0], [1, 1, 1], [1, 0.92, 0.7], [1, 0.75, 0.55], [1, 0.55, 0.45]];
   for (let i = 0; i < N; i++) {
     const r = 900 + Math.random() * 1400;
     const theta = Math.random() * Math.PI * 2;
@@ -143,103 +143,131 @@ function buildNebulae() {
 buildNebulae();
 
 /* =========================================================================
-   BLACK HOLE
+   ACCRETION DISK SHADER (factory — every black hole gets its own instance)
    ========================================================================= */
-const blackHoleGroup = new THREE.Group();
-scene.add(blackHoleGroup);
+function createDiskMaterial(brightness) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: Math.random() * 100 }, uBrightness: { value: brightness } },
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+    `,
+    fragmentShader: `
+      varying vec2 vUv;
+      uniform float uTime;
+      uniform float uBrightness;
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
+      float noise(vec2 p){
+        vec2 i = floor(p); vec2 f = fract(p);
+        float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
+        vec2 u = f*f*(3.0-2.0*f);
+        return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+      }
+      float fbm(vec2 p){
+        float v = 0.0; float amp = 0.55;
+        for(int i=0;i<4;i++){ v += amp*noise(p); p *= 2.05; amp *= 0.55; }
+        return v;
+      }
+      void main(){
+        float radialFrac = clamp(vUv.y, 0.0, 1.0);
+        float angle = vUv.x * 6.28318530718;
+        float angVel = 5.2 / (radialFrac*2.2 + 0.35);
+        float rotAngle = angle + uTime * angVel * 0.12;
+        float turb = fbm(vec2(rotAngle * 2.4, radialFrac * 5.0 - uTime * 0.08));
+        float turb2 = fbm(vec2(rotAngle * 5.5 + 4.0, radialFrac * 9.0 + uTime * 0.05));
+        float brightness = turb * 0.65 + turb2 * 0.45;
+        vec3 hot = vec3(1.0, 0.98, 0.92);
+        vec3 mid = vec3(1.0, 0.55, 0.15);
+        vec3 outer = vec3(0.75, 0.12, 0.05);
+        vec3 col = mix(hot, mid, smoothstep(0.0, 0.45, radialFrac));
+        col = mix(col, outer, smoothstep(0.45, 1.0, radialFrac));
+        float flare = pow(max(turb2,0.0), 4.0) * 1.8;
+        col += vec3(0.7,0.85,1.0) * flare * (1.0 - radialFrac);
+        float edgeFade = smoothstep(0.0, 0.08, radialFrac) * (1.0 - smoothstep(0.82, 1.0, radialFrac));
+        float alpha = edgeFade * (0.35 + brightness * 0.9) * uBrightness;
+        gl_FragColor = vec4(col * (0.6 + brightness*0.9) * uBrightness, alpha);
+      }
+    `,
+  });
+}
 
-const horizonMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(HORIZON_RADIUS, 48, 48),
-  new THREE.MeshBasicMaterial({ color: 0x000000 })
-);
-blackHoleGroup.add(horizonMesh);
+/* =========================================================================
+   BODY REGISTRY
+   All gravitationally-massive, individually-simulated bodies (black holes,
+   stars, planets, moons, comets) live in one flat array so that N-body
+   gravity, nested orbits (moon -> planet -> star -> black hole), and
+   selection all work uniformly.
+   ========================================================================= */
+let bodies = [];
+let idCounter = 1;
+let selected = null;
+let followTarget = null;
 
-// soft dark gravitational shadow
-const shadowTex = makeGlowTexture('rgba(4,2,10,0.95)', 'rgba(4,2,10,0)');
-const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
-shadowSprite.scale.set(HORIZON_RADIUS * 4.2, HORIZON_RADIUS * 4.2, 1);
-blackHoleGroup.add(shadowSprite);
+const NAME_POOL = {
+  blackhole: ['SGR', 'M87', 'CYG-X', 'ABELL'],
+  star: ['SOL', 'SIRIUS', 'VEGA', 'ALTAIR', 'RIGEL', 'CASTOR', 'DENEB'],
+  planet: ['NOVA', 'KEPLER', 'TERRA', 'VULCAN', 'ORION', 'PYRA', 'AXION'],
+  moon: ['LUNA', 'IO', 'TITAN', 'CHARON', 'PHOBOS'],
+  comet: ['HALE', 'ENCKE', 'BIELA', 'SWIFT', 'BORREL'],
+};
+function randomName(type) {
+  const pool = NAME_POOL[type] || ['OBJ'];
+  const w = pool[(Math.random() * pool.length) | 0];
+  const n = String(Math.floor(Math.random() * 90) + 10);
+  return `${w}-${n}`;
+}
 
-// billboard photon-ring halo (bright thin ring, always facing camera)
-const photonTex = makeRingTexture('rgba(255,244,214,0.95)');
-const photonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: photonTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-photonSprite.scale.set(HORIZON_RADIUS * 2.5, HORIZON_RADIUS * 2.5, 1);
-blackHoleGroup.add(photonSprite);
-
-// accretion disk shader
-const diskGeo = new THREE.RingGeometry(HORIZON_RADIUS * 1.2, HORIZON_RADIUS * 6.5, 256, 16);
-const diskMat = new THREE.ShaderMaterial({
-  transparent: true,
-  depthWrite: false,
-  side: THREE.DoubleSide,
-  blending: THREE.AdditiveBlending,
-  uniforms: {
-    uTime: { value: 0 },
-    uBrightness: { value: CONFIG.diskBrightness },
-    uInner: { value: HORIZON_RADIUS * 1.2 },
-    uOuter: { value: HORIZON_RADIUS * 6.5 },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-    void main(){
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+function bhRadii(bh) {
+  const s = Math.max(Math.cbrt(bh.mass / BASE_BH_MASS), 0.3);
+  return { capture: BASE_HORIZON * CAPTURE_MULT * s, tidal: BASE_HORIZON * TIDAL_MULT * s, drag: BASE_HORIZON * DRAG_MULT * s };
+}
+function blackHoles() { return bodies.filter((b) => b.type === 'blackhole'); }
+function nearestBlackHole(pos) {
+  let best = null, bestD = Infinity;
+  for (const bh of blackHoles()) {
+    const d = pos.distanceTo(bh.mesh.position);
+    if (d < bestD) { bestD = d; best = bh; }
+  }
+  return { bh: best, dist: bestD };
+}
+function dominantBlackHole() {
+  let best = null;
+  for (const bh of blackHoles()) if (!best || bh.mass > best.mass) best = bh;
+  return best;
+}
+// the body that exerts the strongest gravitational pull at a given point
+function findDominantAttractor(pos, excludeObj) {
+  let best = null, bestForce = -1;
+  for (const s of bodies) {
+    if (s === excludeObj) continue;
+    const d = Math.max(pos.distanceTo(s.mesh.position), 0.5);
+    const force = s.mass / (d * d);
+    if (force > bestForce) { bestForce = force; best = s; }
+  }
+  return best;
+}
+function orbitalVelocity(pos, center, mass, speedMul = 1) {
+  const rel = pos.clone().sub(center);
+  const r = Math.max(rel.length(), 1);
+  const v = Math.sqrt((CONFIG.G * mass) / r) * speedMul;
+  const dir = new THREE.Vector3(-rel.z, 0, rel.x).normalize();
+  return dir.multiplyScalar(v);
+}
+function starColorForTemp(t) {
+  const stops = [
+    [0.0, new THREE.Color(0xff5533)], [0.3, new THREE.Color(0xffa447)],
+    [0.55, new THREE.Color(0xfff3c2)], [0.8, new THREE.Color(0xdcefff)], [1.0, new THREE.Color(0x9fd4ff)],
+  ];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i][0] && t <= stops[i + 1][0]) {
+      const lt = (t - stops[i][0]) / (stops[i + 1][0] - stops[i][0]);
+      return stops[i][1].clone().lerp(stops[i + 1][1], lt);
     }
-  `,
-  fragmentShader: `
-    varying vec2 vUv;
-    uniform float uTime;
-    uniform float uBrightness;
-    uniform float uInner;
-    uniform float uOuter;
-
-    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123); }
-    float noise(vec2 p){
-      vec2 i = floor(p); vec2 f = fract(p);
-      float a = hash(i), b = hash(i+vec2(1.0,0.0)), c = hash(i+vec2(0.0,1.0)), d = hash(i+vec2(1.0,1.0));
-      vec2 u = f*f*(3.0-2.0*f);
-      return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
-    }
-    float fbm(vec2 p){
-      float v = 0.0; float amp = 0.55;
-      for(int i=0;i<4;i++){ v += amp*noise(p); p *= 2.05; amp *= 0.55; }
-      return v;
-    }
-
-    void main(){
-      float radialFrac = clamp(vUv.y, 0.0, 1.0);
-      float radius = mix(uInner, uOuter, radialFrac);
-      float angle = vUv.x * 6.28318530718;
-
-      // differential rotation: inner edge spins much faster
-      float angVel = 5.2 / (radialFrac*2.2 + 0.35);
-      float rotAngle = angle + uTime * angVel * 0.12;
-
-      float turb = fbm(vec2(rotAngle * 2.4, radialFrac * 5.0 - uTime * 0.08));
-      float turb2 = fbm(vec2(rotAngle * 5.5 + 4.0, radialFrac * 9.0 + uTime * 0.05));
-      float brightness = turb * 0.65 + turb2 * 0.45;
-
-      // color ramp: white-hot inner -> yellow/orange mid -> deep red outer
-      vec3 hot = vec3(1.0, 0.98, 0.92);
-      vec3 mid = vec3(1.0, 0.55, 0.15);
-      vec3 outer = vec3(0.75, 0.12, 0.05);
-      vec3 col = mix(hot, mid, smoothstep(0.0, 0.45, radialFrac));
-      col = mix(col, outer, smoothstep(0.45, 1.0, radialFrac));
-
-      // hot turbulent flares
-      float flare = pow(max(turb2,0.0), 4.0) * 1.8;
-      col += vec3(0.7,0.85,1.0) * flare * (1.0 - radialFrac);
-
-      float edgeFade = smoothstep(0.0, 0.08, radialFrac) * (1.0 - smoothstep(0.82, 1.0, radialFrac));
-      float alpha = edgeFade * (0.35 + brightness * 0.9) * uBrightness;
-
-      gl_FragColor = vec4(col * (0.6 + brightness*0.9) * uBrightness, alpha);
-    }
-  `,
-});
-const diskMesh = new THREE.Mesh(diskGeo, diskMat);
-diskMesh.rotation.x = -Math.PI / 2;
-blackHoleGroup.add(diskMesh);
+  }
+  return stops[stops.length - 1][1].clone();
+}
+function tempKtoFrac(k) { return THREE.MathUtils.clamp((k - 2500) / (30000 - 2500), 0, 1); }
 
 /* =========================================================================
    TRAIL SYSTEM
@@ -256,23 +284,22 @@ function createTrail(color, opacity = 0.35, additive = false) {
   });
   const line = new THREE.Line(geo, mat);
   scene.add(line);
-  return { line, points: [], geo };
+  return { line, points: [], geo, baseOpacity: opacity };
 }
 function updateTrail(trail, pos) {
   trail.points.push(pos.clone());
   if (trail.points.length > TRAIL_LEN) trail.points.shift();
   const arr = trail.geo.attributes.position.array;
   for (let i = 0; i < trail.points.length; i++) {
-    arr[i * 3] = trail.points[i].x;
-    arr[i * 3 + 1] = trail.points[i].y;
-    arr[i * 3 + 2] = trail.points[i].z;
+    arr[i * 3] = trail.points[i].x; arr[i * 3 + 1] = trail.points[i].y; arr[i * 3 + 2] = trail.points[i].z;
   }
   trail.geo.attributes.position.needsUpdate = true;
   trail.geo.setDrawRange(0, trail.points.length);
   trail.geo.computeBoundingSphere();
 }
 
-// predicted trajectory (single reusable line)
+// predicted trajectory (single reusable dashed line, approximated against the
+// single strongest local attractor at each simulated step)
 const predictGeo = new THREE.BufferGeometry();
 const predictPositions = new Float32Array(80 * 3);
 predictGeo.setAttribute('position', new THREE.BufferAttribute(predictPositions, 3));
@@ -281,65 +308,84 @@ predictLine.visible = false;
 scene.add(predictLine);
 
 /* =========================================================================
-   OBJECT REGISTRIES
+   SELECTION VISUALS (shared, repositioned to whichever object is selected)
    ========================================================================= */
-let bodies = []; // stars, planets, comets (individually simulated)
-let selected = null;
-let followTarget = null;
-let idCounter = 1;
+const selectionRing = new THREE.Sprite(new THREE.SpriteMaterial({ map: selectionRingTex, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+selectionRing.visible = false;
+scene.add(selectionRing);
 
-const NAME_POOL = {
-  planet: ['NOVA', 'KEPLER', 'TERRA', 'VULCAN', 'ORION', 'PYRA', 'AXION'],
-  star: ['SOL', 'SIRIUS', 'VEGA', 'ALTAIR', 'RIGEL', 'CASTOR', 'DENEB'],
-  comet: ['HALE', 'ENCKE', 'BIELA', 'SWIFT', 'BORREL'],
-};
-function randomName(type) {
-  const pool = NAME_POOL[type] || ['OBJ'];
-  const w = pool[(Math.random() * pool.length) | 0];
-  const n = String(Math.floor(Math.random() * 90) + 10);
-  return `${w}-${n}`;
-}
+const velocityArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xffe066, 2.2, 1.3);
+velocityArrow.visible = false;
+scene.add(velocityArrow);
 
-function circularVelocity(pos, speedMul = 1) {
-  const r = Math.max(pos.length(), 1);
-  const v = Math.sqrt((CONFIG.G * CONFIG.blackHoleMass) / r) * speedMul;
-  // tangential direction in XZ plane
-  const dir = new THREE.Vector3(-pos.z, 0, pos.x).normalize();
-  return dir.multiplyScalar(v);
-}
+const dragArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0x7fd9ff, 3, 1.6);
+dragArrow.visible = false;
+scene.add(dragArrow);
 
-function starColorForTemp(t) {
-  // t: 0 (cool/red) .. 1 (hot/blue)
-  const stops = [
-    [0.0, new THREE.Color(0xff5533)],
-    [0.3, new THREE.Color(0xffa447)],
-    [0.55, new THREE.Color(0xfff3c2)],
-    [0.8, new THREE.Color(0xdcefff)],
-    [1.0, new THREE.Color(0x9fd4ff)],
-  ];
-  for (let i = 0; i < stops.length - 1; i++) {
-    if (t >= stops[i][0] && t <= stops[i + 1][0]) {
-      const localT = (t - stops[i][0]) / (stops[i + 1][0] - stops[i][0]);
-      return stops[i][1].clone().lerp(stops[i + 1][1], localT);
-    }
-  }
-  return stops[stops.length - 1][1].clone();
-}
+const influenceSphere = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0x7fd9ff, wireframe: true, transparent: true, opacity: 0.16, depthWrite: false })
+);
+influenceSphere.visible = false;
+scene.add(influenceSphere);
 
-/* ---------- STAR ---------- */
-function createStar(opts = {}) {
-  const temp = opts.temp ?? Math.random();
-  const color = starColorForTemp(temp);
-  const size = opts.size ?? (0.8 + temp * 1.6);
+/* =========================================================================
+   BLACK HOLE FACTORY
+   ========================================================================= */
+function createBlackHole(opts = {}) {
+  const mass = opts.mass ?? 5000;
+  const visualRadius = Math.max(BASE_HORIZON * Math.cbrt(mass / BASE_BH_MASS), 2.5);
   const group = new THREE.Group();
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(size, 24, 24),
-    new THREE.MeshBasicMaterial({ color })
-  );
+
+  const horizonMesh = new THREE.Mesh(new THREE.SphereGeometry(visualRadius, 48, 48), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+  group.add(horizonMesh);
+
+  const shadowTex = makeGlowTexture('rgba(4,2,10,0.95)', 'rgba(4,2,10,0)');
+  const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
+  shadowSprite.scale.set(visualRadius * 4.2, visualRadius * 4.2, 1);
+  group.add(shadowSprite);
+
+  const photonTex = makeRingTexture('rgba(255,244,214,0.95)');
+  const photonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: photonTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  photonSprite.scale.set(visualRadius * 2.5, visualRadius * 2.5, 1);
+  group.add(photonSprite);
+
+  const diskMat = createDiskMaterial(CONFIG.diskBrightness);
+  const diskGeo = new THREE.RingGeometry(visualRadius * 1.2, visualRadius * 6.5, 256, 16);
+  const diskMesh = new THREE.Mesh(diskGeo, diskMat);
+  diskMesh.rotation.x = -Math.PI / 2;
+  group.add(diskMesh);
+
+  const pos = opts.position || new THREE.Vector3();
+  group.position.copy(pos);
+  scene.add(group);
+
+  const obj = {
+    id: idCounter++, type: 'blackhole', name: opts.name || randomName('blackhole') + '-PRIME',
+    mesh: group, core: horizonMesh, diskMat, photonSprite, visualRadius,
+    mass, radius: visualRadius,
+    velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
+    status: 'stable', age: 0, temp: null,
+    trail: createTrail(0x554466, 0.2),
+    lastLog: {},
+  };
+  bodies.push(obj);
+  registerSelectable(horizonMesh, obj);
+  return obj;
+}
+
+/* =========================================================================
+   STAR / PLANET / MOON / COMET FACTORIES
+   ========================================================================= */
+function createStar(opts = {}) {
+  const tempK = opts.tempK ?? THREE.MathUtils.lerp(3200, 22000, Math.random());
+  const tFrac = tempKtoFrac(tempK);
+  const color = starColorForTemp(tFrac);
+  const size = opts.size ?? (0.8 + tFrac * 1.6);
+  const group = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.SphereGeometry(size, 24, 24), new THREE.MeshBasicMaterial({ color }));
   group.add(core);
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: starGlowTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.85,
-  }));
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: starGlowTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.85 }));
   glow.scale.set(size * 7, size * 7, 1);
   group.add(glow);
 
@@ -350,30 +396,23 @@ function createStar(opts = {}) {
   const obj = {
     id: idCounter++, type: 'star', name: opts.name || randomName('star'),
     mesh: group, core, glow,
-    mass: opts.mass ?? (2 + Math.random() * 20),
-    radius: size,
-    velocity: opts.velocity || circularVelocity(pos, 0.85 + Math.random() * 0.3),
-    temp,
-    status: 'stable',
+    mass: opts.mass ?? (2 + Math.random() * 20), radius: size,
+    velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.85 + Math.random() * 0.3),
+    tempK, status: 'stable', age: 0,
     trail: createTrail(color.getHex(), 0.4),
     lastLog: {},
-    baseScale: 1,
   };
   bodies.push(obj);
   registerSelectable(core, obj);
   return obj;
 }
 
-/* ---------- PLANET ---------- */
 function createPlanet(opts = {}) {
   const size = opts.size ?? (1.2 + Math.random() * 2.2);
-  const hue = Math.random();
+  const hue = opts.hue ?? Math.random();
   const color = new THREE.Color().setHSL(hue, 0.55, 0.5 + Math.random() * 0.15);
   const group = new THREE.Group();
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(size, 32, 32),
-    new THREE.MeshPhongMaterial({ color, emissive: color.clone().multiplyScalar(0.08), shininess: 8 })
-  );
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 32, 32), new THREE.MeshPhongMaterial({ color, emissive: color.clone().multiplyScalar(0.08), shininess: 8 }));
   group.add(mesh);
 
   if (Math.random() < 0.4) {
@@ -383,13 +422,6 @@ function createPlanet(opts = {}) {
     ring.rotation.x = Math.PI / 2.3;
     group.add(ring);
   }
-  let moon = null;
-  if (Math.random() < 0.5) {
-    moon = new THREE.Mesh(new THREE.SphereGeometry(size * 0.28, 12, 12), new THREE.MeshBasicMaterial({ color: 0xaaaaaa }));
-    moon.userData.orbitR = size * 3.2;
-    moon.userData.angle = Math.random() * Math.PI * 2;
-    group.add(moon);
-  }
 
   const pos = opts.position || randomOrbitPosition(40, 220);
   group.position.copy(pos);
@@ -397,21 +429,45 @@ function createPlanet(opts = {}) {
 
   const obj = {
     id: idCounter++, type: 'planet', name: opts.name || randomName('planet'),
-    mesh: group, core: mesh, moon,
-    mass: opts.mass ?? (0.5 + Math.random() * 8),
-    radius: size,
-    velocity: opts.velocity || circularVelocity(pos, 0.9 + Math.random() * 0.25),
-    status: 'stable',
+    mesh: group, core: mesh,
+    mass: opts.mass ?? (0.5 + Math.random() * 8), radius: size,
+    velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.9 + Math.random() * 0.25),
+    status: 'stable', age: 0,
     trail: createTrail(color.getHex(), 0.3),
     lastLog: {},
-    baseScale: 1,
   };
   bodies.push(obj);
   registerSelectable(mesh, obj);
   return obj;
 }
 
-/* ---------- COMET ---------- */
+// moons are physically identical to planets, just smaller and always spawned
+// relative to an existing parent planet's position/velocity
+function createMoon(opts = {}) {
+  const size = opts.size ?? (0.3 + Math.random() * 0.7);
+  const color = new THREE.Color(0xaaaaaa).offsetHSL(0, 0, (Math.random() - 0.5) * 0.2);
+  const group = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 20, 20), new THREE.MeshPhongMaterial({ color, shininess: 4 }));
+  group.add(mesh);
+
+  const pos = opts.position || randomOrbitPosition(6, 14);
+  group.position.copy(pos);
+  scene.add(group);
+
+  const obj = {
+    id: idCounter++, type: 'moon', name: opts.name || randomName('moon'),
+    mesh: group, core: mesh,
+    mass: opts.mass ?? (0.02 + Math.random() * 0.3), radius: size,
+    velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
+    status: 'stable', age: 0,
+    trail: createTrail(color.getHex(), 0.3),
+    lastLog: {},
+  };
+  bodies.push(obj);
+  registerSelectable(mesh, obj);
+  return obj;
+}
+
 function createComet(opts = {}) {
   const size = opts.size ?? 0.6;
   const color = 0xbfe9ff;
@@ -428,13 +484,11 @@ function createComet(opts = {}) {
   const obj = {
     id: idCounter++, type: 'comet', name: opts.name || randomName('comet'),
     mesh: group, core, glow,
-    mass: opts.mass ?? (0.05 + Math.random() * 0.4),
-    radius: size,
-    velocity: opts.velocity || circularVelocity(pos, 1.1 + Math.random() * 0.5),
-    status: 'stable',
+    mass: opts.mass ?? (0.05 + Math.random() * 0.4), radius: size,
+    velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 1.1 + Math.random() * 0.5),
+    status: 'stable', age: 0,
     trail: createTrail(0x8fe0ff, 0.6, true),
     lastLog: {},
-    baseScale: 1,
   };
   bodies.push(obj);
   registerSelectable(core, obj);
@@ -448,35 +502,30 @@ function randomOrbitPosition(minR, maxR) {
 }
 
 /* =========================================================================
-   ASTEROID FIELD (instanced, pooled)
+   ASTEROID FIELD (instanced test-particles, pooled, feel every massive body)
    ========================================================================= */
 let asteroidMesh = null;
 let aPos = [], aVel = [], aMass = [], aRadius = [], aAlive = [];
 const dummy = new THREE.Object3D();
 
 function initAsteroids(count) {
-  if (asteroidMesh) {
-    scene.remove(asteroidMesh);
-    asteroidMesh.geometry.dispose();
-    asteroidMesh.material.dispose();
-  }
+  if (asteroidMesh) { scene.remove(asteroidMesh); asteroidMesh.geometry.dispose(); asteroidMesh.material.dispose(); }
   aPos = []; aVel = []; aMass = []; aRadius = []; aAlive = [];
   const geo = new THREE.IcosahedronGeometry(1, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x8b8378, roughness: 0.95, metalness: 0.05 });
   asteroidMesh = new THREE.InstancedMesh(geo, mat, Math.max(count, 1));
   asteroidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(asteroidMesh);
-  for (let i = 0; i < count; i++) spawnAsteroid(i, true);
+  for (let i = 0; i < count; i++) spawnAsteroid(i);
 }
-function spawnAsteroid(i, initial = false) {
-  const pos = randomOrbitPosition(HORIZON_RADIUS * 4, 200);
-  aPos[i] = pos;
-  aVel[i] = circularVelocity(pos, 0.75 + Math.random() * 0.5);
-  aMass[i] = 0.05 + Math.random() * 1.5;
-  aRadius[i] = 0.3 + Math.random() * 1.1;
+function spawnAsteroid(i, pos, vel, mass, size) {
+  aPos[i] = pos || randomOrbitPosition(BASE_HORIZON * 4, 200);
+  aVel[i] = vel || orbitalVelocity(aPos[i], new THREE.Vector3(), CONFIG.blackHoleMass, 0.75 + Math.random() * 0.5);
+  aMass[i] = mass ?? (0.05 + Math.random() * 1.5);
+  aRadius[i] = size ?? (0.3 + Math.random() * 1.1);
   aAlive[i] = 1;
-  dummy.position.copy(pos);
-  dummy.scale.set(aRadius[i] * (0.7 + Math.random() * 0.6), aRadius[i] * (0.7 + Math.random() * 0.6), aRadius[i] * (0.7 + Math.random() * 0.6));
+  dummy.position.copy(aPos[i]);
+  dummy.scale.setScalar(aRadius[i]);
   dummy.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
   dummy.updateMatrix();
   asteroidMesh.setMatrixAt(i, dummy.matrix);
@@ -486,26 +535,25 @@ initAsteroids(CONFIG.asteroidCount);
 let collisionLogCooldown = 0;
 function updateAsteroids(dt) {
   const n = aPos.length;
-  // simple spatial grid for coarse collision checks
   const grid = new Map();
   const cellSize = 8;
   for (let i = 0; i < n; i++) {
     if (!aAlive[i]) continue;
     const pos = aPos[i];
-    const r = pos.length();
+    const { bh, dist: r } = nearestBlackHole(pos);
+    if (bh && r < bhRadii(bh).capture) { spawnAsteroid(i); continue; }
 
-    if (r < CAPTURE_R) { spawnAsteroid(i); continue; }
-
-    const accel = -(CONFIG.G * CONFIG.blackHoleMass) / (r * r);
-    const dir = pos.clone().normalize();
-    aVel[i].addScaledVector(dir, accel * dt);
-    if (r < DRAG_R) {
-      const k = (DRAG_R - r) / DRAG_R;
-      aVel[i].multiplyScalar(1 - k * 0.015 * dt * 60);
+    const accel = computeAcceleration(pos, null, bodies);
+    aVel[i].addScaledVector(accel, dt);
+    if (bh) {
+      const radii = bhRadii(bh);
+      if (r < radii.drag) {
+        const k = (radii.drag - r) / radii.drag;
+        aVel[i].multiplyScalar(1 - k * 0.015 * dt * 60);
+      }
     }
     aPos[i].addScaledVector(aVel[i], dt);
-
-    if (r > ESCAPE_R) spawnAsteroid(i);
+    if (pos.length() > ESCAPE_R) spawnAsteroid(i);
 
     const key = `${Math.floor(aPos[i].x / cellSize)}_${Math.floor(aPos[i].z / cellSize)}`;
     if (!grid.has(key)) grid.set(key, []);
@@ -524,10 +572,7 @@ function updateAsteroids(dt) {
           aVel[j].addScaledVector(n1, -0.6);
           aPos[i].addScaledVector(n1, 0.15);
           aPos[j].addScaledVector(n1, -0.15);
-          if (collisionLogCooldown <= 0) {
-            logEvent('ASTEROID COLLISION DETECTED', 'info');
-            collisionLogCooldown = 4;
-          }
+          if (collisionLogCooldown <= 0) { logEvent('ASTEROID COLLISION DETECTED', 'info'); collisionLogCooldown = 4; }
         }
       }
     }
@@ -536,8 +581,7 @@ function updateAsteroids(dt) {
   for (let i = 0; i < n; i++) {
     if (!aAlive[i]) continue;
     dummy.position.copy(aPos[i]);
-    const s = aRadius[i];
-    dummy.scale.set(s, s, s);
+    dummy.scale.setScalar(aRadius[i]);
     dummy.rotation.y += 0.002;
     dummy.updateMatrix();
     asteroidMesh.setMatrixAt(i, dummy.matrix);
@@ -546,9 +590,25 @@ function updateAsteroids(dt) {
 }
 
 /* =========================================================================
+   N-BODY GRAVITY
+   ========================================================================= */
+function computeAcceleration(pos, excludeObj, sources) {
+  const accel = new THREE.Vector3();
+  for (const s of sources) {
+    if (s === excludeObj) continue;
+    const dx = s.mesh.position.x - pos.x, dy = s.mesh.position.y - pos.y, dz = s.mesh.position.z - pos.z;
+    const distSq = dx * dx + dy * dy + dz * dz + SOFTENING * SOFTENING;
+    const distSoft = Math.sqrt(distSq);
+    const f = (CONFIG.G * s.mass) / (distSq * distSoft);
+    accel.x += f * dx; accel.y += f * dy; accel.z += f * dz;
+  }
+  return accel;
+}
+
+/* =========================================================================
    SELECTION / RAYCASTING
    ========================================================================= */
-const selectableMap = new Map(); // mesh.uuid -> obj
+const selectableMap = new Map();
 function registerSelectable(mesh, obj) { selectableMap.set(mesh.uuid, obj); }
 function unregisterSelectable(mesh) { selectableMap.delete(mesh.uuid); }
 
@@ -567,6 +627,7 @@ function getPointer(e) {
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (e.button === 2) return;
   const p = getPointer(e);
+  if (placement) { beginPlacementDrag(p); return; }
   pointerDownPos = p; pointerDownTime = performance.now();
   if (e.pointerType === 'touch') {
     clearTimeout(longPressTimer);
@@ -574,13 +635,15 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   }
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (!pointerDownPos) return;
   const t = (e.touches && e.touches[0]) || e;
+  if (placement) { updatePlacementPointer(t.clientX, t.clientY); return; }
+  if (!pointerDownPos) return;
   const dx = t.clientX - pointerDownPos.x, dy = t.clientY - pointerDownPos.y;
   if (Math.hypot(dx, dy) > 8) clearTimeout(longPressTimer);
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
   clearTimeout(longPressTimer);
+  if (placement) { const p = getPointer(e); endPlacementDrag(p); return; }
   if (e.button === 2 || !pointerDownPos) return;
   const p = getPointer(e);
   const dx = p.x - pointerDownPos.x, dy = p.y - pointerDownPos.y;
@@ -592,64 +655,69 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 function handleClick() {
   raycaster.setFromCamera(pointerNDC, camera);
   const meshes = [...selectableMap.keys()].map((uuid) => scene.getObjectByProperty('uuid', uuid)).filter(Boolean);
-  meshes.push(horizonMesh);
   const hits = raycaster.intersectObjects(meshes, false);
-  // also test asteroids
   let asteroidHit = null;
   if (asteroidMesh) {
     const ahits = raycaster.intersectObject(asteroidMesh);
     if (ahits.length && (!hits.length || ahits[0].distance < hits[0].distance)) asteroidHit = ahits[0];
   }
-  if (asteroidHit && (!hits.length)) {
-    selectAsteroid(asteroidHit.instanceId);
-    return;
-  }
+  if (asteroidHit && !hits.length) { selectAsteroid(asteroidHit.instanceId); return; }
   if (hits.length === 0) { deselect(); return; }
-  const mesh = hits[0].object;
-  if (mesh === horizonMesh) { selectBlackHole(); return; }
-  const obj = selectableMap.get(mesh.uuid);
+  const obj = selectableMap.get(hits[0].object.uuid);
   if (obj) select(obj);
 }
 
 function select(obj) {
+  if (selected && selected.trail) selected.trail.line.material.opacity = selected.trail.baseOpacity;
   selected = obj;
+  if (obj.trail) obj.trail.line.material.opacity = Math.min(0.9, obj.trail.baseOpacity * 2.2);
   document.getElementById('info-panel').classList.remove('hidden');
   document.getElementById('btn-follow').disabled = false;
-  document.getElementById('btn-delete-obj').classList.remove('hidden');
-  predictLine.visible = true;
+  document.getElementById('btn-delete-obj').classList.toggle('hidden', obj.type === 'blackhole');
+  predictLine.visible = obj.type !== 'blackhole';
 }
 function selectAsteroid(instanceId) {
+  if (selected && selected.trail) selected.trail.line.material.opacity = selected.trail.baseOpacity;
   selected = { type: 'asteroid', name: `AST-${instanceId}`, isAsteroid: true, index: instanceId };
   document.getElementById('info-panel').classList.remove('hidden');
   document.getElementById('btn-follow').disabled = true;
   document.getElementById('btn-delete-obj').classList.add('hidden');
   predictLine.visible = false;
 }
-function selectBlackHole() {
-  selected = { type: 'blackhole', name: 'SAGITTARIUS PRIME', isBH: true };
-  document.getElementById('info-panel').classList.remove('hidden');
-  document.getElementById('btn-follow').disabled = true;
-  document.getElementById('btn-delete-obj').classList.add('hidden');
-  predictLine.visible = false;
-}
 function deselect() {
+  if (selected && selected.trail) selected.trail.line.material.opacity = selected.trail.baseOpacity;
   selected = null;
   document.getElementById('info-panel').classList.add('hidden');
   document.getElementById('btn-follow').disabled = true;
   predictLine.visible = false;
+  selectionRing.visible = velocityArrow.visible = influenceSphere.visible = false;
 }
 document.getElementById('btn-delete-obj').addEventListener('click', () => {
-  if (selected && !selected.isAsteroid && !selected.isBH) destroyObject(selected, 'removed', true);
+  if (selected && !selected.isAsteroid && selected.type !== 'blackhole') destroyObject(selected, 'removed', true);
   deselect();
 });
 
 /* =========================================================================
-   CONTEXT MENU / OBJECT CREATION
+   CONTEXT MENU / CREATE-OBJECT BUTTON / DRAG-TO-LAUNCH PLACEMENT
    ========================================================================= */
 const ctxMenu = document.getElementById('context-menu');
-const createDialog = document.getElementById('create-dialog');
-let pendingSpawn = null;
+const placementPanel = document.getElementById('placement-panel');
 const spawnPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+// placement state: { type, parentBody?, dragStart?, dragging }
+let placement = null;
+let ghostMarker = null;
+function getGhostMarker() {
+  if (!ghostMarker) {
+    ghostMarker = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(2, 0),
+      new THREE.MeshBasicMaterial({ color: 0x7fd9ff, wireframe: true, transparent: true, opacity: 0.7 })
+    );
+    ghostMarker.visible = false;
+    scene.add(ghostMarker);
+  }
+  return ghostMarker;
+}
 
 function worldPointFromScreen(x, y) {
   pointerNDC.x = (x / window.innerWidth) * 2 - 1;
@@ -657,70 +725,123 @@ function worldPointFromScreen(x, y) {
   raycaster.setFromCamera(pointerNDC, camera);
   const out = new THREE.Vector3();
   raycaster.ray.intersectPlane(spawnPlane, out);
-  return out || new THREE.Vector3();
+  return out;
 }
 
 function openContextMenu(x, y) {
-  ctxMenu.style.left = x + 'px';
-  ctxMenu.style.top = y + 'px';
+  ctxMenu.style.left = Math.min(x, window.innerWidth - 210) + 'px';
+  ctxMenu.style.top = Math.min(y, window.innerHeight - 200) + 'px';
   ctxMenu.classList.remove('hidden');
-  ctxMenu.dataset.x = x; ctxMenu.dataset.y = y;
 }
 function closeContextMenu() { ctxMenu.classList.add('hidden'); }
 
-renderer.domElement.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  openContextMenu(e.clientX, e.clientY);
+renderer.domElement.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!placement) openContextMenu(e.clientX, e.clientY); });
+document.getElementById('btn-create').addEventListener('click', (e) => {
+  const r = e.target.getBoundingClientRect();
+  openContextMenu(r.right + 8, r.top);
 });
-document.addEventListener('pointerdown', (e) => {
-  if (!ctxMenu.contains(e.target) && !ctxMenu.classList.contains('hidden')) closeContextMenu();
-});
+document.addEventListener('pointerdown', (e) => { if (!ctxMenu.contains(e.target) && !ctxMenu.classList.contains('hidden')) closeContextMenu(); });
+
 ctxMenu.querySelectorAll('.ctx-item').forEach((item) => {
-  item.addEventListener('click', () => {
-    const type = item.dataset.type;
-    const pt = worldPointFromScreen(+ctxMenu.dataset.x, +ctxMenu.dataset.y);
-    closeContextMenu();
-    pendingSpawn = { type, point: pt };
-    document.getElementById('create-title').textContent = 'CREATE ' + type.toUpperCase();
-    createDialog.classList.remove('hidden');
-  });
+  item.addEventListener('click', () => { startPlacement(item.dataset.type); closeContextMenu(); });
 });
-document.getElementById('btn-c-cancel').addEventListener('click', () => createDialog.classList.add('hidden'));
-document.getElementById('btn-c-confirm').addEventListener('click', () => {
-  if (!pendingSpawn) return;
-  const mass = +document.getElementById('slider-c-mass').value;
-  const size = +document.getElementById('slider-c-size').value;
-  const speedMul = +document.getElementById('slider-c-speed').value;
-  const pos = pendingSpawn.point;
-  const vel = circularVelocity(pos, speedMul);
-  switch (pendingSpawn.type) {
-    case 'planet': createPlanet({ position: pos, mass, size, velocity: vel }); break;
-    case 'star': createStar({ position: pos, mass, size, velocity: vel }); break;
-    case 'comet': createComet({ position: pos, mass, size, velocity: vel }); break;
+
+function startPlacement(type) {
+  let parentBody = null;
+  if (type === 'moon') {
+    if (!selected || selected.type !== 'planet') {
+      showBanner('SELECT A PLANET FIRST');
+      logEvent('Moon creation requires a selected planet to orbit.', 'info');
+      return;
+    }
+    parentBody = selected;
+  }
+  placement = { type, parentBody, dragging: false, dragStart: null };
+  controls.enabled = true; // camera stays usable until the user actually starts dragging on empty space
+  document.getElementById('placement-title').textContent = 'PLACING ' + type.toUpperCase() + (parentBody ? ` (ORBITS ${parentBody.name})` : '');
+  document.getElementById('input-p-name').value = randomName(type);
+  document.getElementById('row-p-temp').classList.toggle('hidden', type !== 'star');
+  placementPanel.classList.remove('hidden');
+  getGhostMarker().visible = true;
+}
+function cancelPlacement() {
+  placement = null;
+  placementPanel.classList.add('hidden');
+  if (ghostMarker) ghostMarker.visible = false;
+  dragArrow.visible = false;
+  controls.enabled = true;
+}
+document.getElementById('btn-p-cancel').addEventListener('click', cancelPlacement);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && placement) cancelPlacement(); });
+
+function updatePlacementPointer(x, y) {
+  const pt = worldPointFromScreen(x, y);
+  if (!placement.dragging) {
+    getGhostMarker().position.copy(pt);
+  } else {
+    const drag = pt.clone().sub(placement.dragStart);
+    dragArrow.position.copy(placement.dragStart);
+    if (drag.length() > 0.4) {
+      dragArrow.visible = true;
+      dragArrow.setDirection(drag.clone().normalize());
+      dragArrow.setLength(Math.min(drag.length(), 220), 3, 1.6);
+    } else dragArrow.visible = false;
+    ghostMarker.position.copy(placement.dragStart);
+  }
+}
+function beginPlacementDrag(p) {
+  placement.dragging = true;
+  placement.dragStart = worldPointFromScreen(p.x, p.y);
+  controls.enabled = false;
+}
+function endPlacementDrag(p) {
+  if (!placement || !placement.dragging) return;
+  const endPt = worldPointFromScreen(p.x, p.y);
+  const dragStart = placement.dragStart;
+  const dragVec = endPt.clone().sub(dragStart);
+  const name = document.getElementById('input-p-name').value.trim() || randomName(placement.type);
+  const mass = +document.getElementById('slider-p-mass').value;
+  const size = +document.getElementById('slider-p-size').value;
+  const tempK = +document.getElementById('slider-p-temp').value;
+
+  let velocity;
+  if (placement.type === 'moon') {
+    const parent = placement.parentBody;
+    if (dragVec.length() > 2) velocity = dragVec.clone().multiplyScalar(VELOCITY_DRAG_SCALE).add(parent.velocity);
+    else velocity = orbitalVelocity(dragStart, parent.mesh.position, parent.mass, 1).add(parent.velocity);
+  } else if (dragVec.length() > 2) {
+    velocity = dragVec.clone().multiplyScalar(VELOCITY_DRAG_SCALE);
+  } else {
+    const dominant = findDominantAttractor(dragStart, null);
+    velocity = dominant ? orbitalVelocity(dragStart, dominant.mesh.position, dominant.mass, 1).add(dominant.velocity) : new THREE.Vector3();
+  }
+
+  spawnFromPlacement(placement.type, dragStart, velocity, { name, mass, size, tempK, parentBody: placement.parentBody });
+  logEvent(`New ${placement.type} "${name}" deployed into the field.`, 'info');
+  cancelPlacement();
+}
+function spawnFromPlacement(type, pos, vel, props) {
+  switch (type) {
+    case 'star': createStar({ position: pos, velocity: vel, mass: props.mass, size: props.size, tempK: props.tempK, name: props.name }); break;
+    case 'planet': createPlanet({ position: pos, velocity: vel, mass: props.mass, size: props.size, name: props.name }); break;
+    case 'moon': createMoon({ position: pos, velocity: vel, mass: Math.min(props.mass, 30), size: Math.min(props.size, 1.5), name: props.name }); break;
+    case 'comet': createComet({ position: pos, velocity: vel, mass: Math.min(props.mass, 2), size: Math.min(props.size, 1.2), name: props.name }); break;
+    case 'blackhole': createBlackHole({ position: pos, velocity: vel, mass: Math.max(props.mass * 30, 400), name: props.name }); break;
     case 'asteroid': {
-      // recycle a random slot in the pool to spawn the user-placed asteroid
       const i = aPos.length ? Math.floor(Math.random() * aPos.length) : 0;
-      spawnAsteroid(i);
-      aPos[i].copy(pos); aVel[i].copy(vel); aMass[i] = Math.max(mass * 0.2, 0.05); aRadius[i] = Math.max(size * 0.5, 0.2);
+      spawnAsteroid(i, pos, vel, Math.max(props.mass * 0.15, 0.05), Math.max(props.size * 0.5, 0.2));
       break;
     }
-    case 'blackhole':
-      createStar({ position: pos, mass: mass * 20, size: size * 2.5, velocity: vel, name: 'SINGULARITY-' + idCounter });
-      logEvent('A companion mass has entered the system.', 'info');
-      break;
   }
-  logEvent(`New ${pendingSpawn.type} deployed into the field.`, 'info');
-  createDialog.classList.add('hidden');
-  pendingSpawn = null;
-});
-['slider-c-mass', 'slider-c-size', 'slider-c-speed'].forEach((id) => {
+}
+['slider-p-mass', 'slider-p-size', 'slider-p-temp'].forEach((id) => {
   const el = document.getElementById(id);
-  const valEl = document.getElementById('val-' + id.replace('slider-', ''));
-  el.addEventListener('input', () => { valEl.textContent = (+el.value).toFixed(id === 'slider-c-mass' ? 1 : 2); });
+  const valId = 'val-' + id.replace('slider-', '');
+  el.addEventListener('input', () => { document.getElementById(valId).textContent = id === 'slider-p-temp' ? (+el.value).toFixed(0) : (+el.value).toFixed(1); });
 });
 
 /* =========================================================================
-   DESTRUCTION / TIDAL EFFECTS
+   DESTRUCTION / TIDAL EFFECTS / BANNERS
    ========================================================================= */
 function burstAtDisk(position) {
   const n = 40;
@@ -744,7 +865,6 @@ function burstAtDisk(position) {
   }
   fade();
 }
-
 function showBanner(text) {
   const el = document.getElementById('notify-banner');
   el.textContent = text;
@@ -752,7 +872,6 @@ function showBanner(text) {
   clearTimeout(showBanner._t);
   showBanner._t = setTimeout(() => el.classList.add('hidden'), 2600);
 }
-
 function destroyObject(obj, reason, silent = false) {
   scene.remove(obj.mesh);
   scene.remove(obj.trail.line);
@@ -788,61 +907,60 @@ function logEvent(text, level = 'info') {
 }
 
 /* =========================================================================
-   PHYSICS STEP FOR MAIN BODIES
+   PHYSICS STEP FOR MASSIVE BODIES (stars / planets / moons / comets / black holes)
    ========================================================================= */
 function stepBody(obj, dt) {
+  const accel = computeAcceleration(obj.mesh.position, obj, bodies);
+  obj.velocity.addScaledVector(accel, dt);
+  obj.mesh.position.addScaledVector(obj.velocity, dt);
+  obj.age += dt * AGE_YEARS_PER_SIMSECOND;
+
+  if (obj.type === 'blackhole') { updateTrail(obj.trail, obj.mesh.position); return; }
+
   const pos = obj.mesh.position;
-  const r = pos.length();
+  const { bh, dist: r } = nearestBlackHole(pos);
+  if (bh) {
+    const radii = bhRadii(bh);
+    if (r < radii.capture) { destroyObject(obj, 'captured'); return; }
 
-  if (r < CAPTURE_R) {
-    destroyObject(obj, 'captured');
-    return;
-  }
-
-  const accelMag = -(CONFIG.G * CONFIG.blackHoleMass) / (r * r);
-  const dir = pos.clone().normalize();
-  obj.velocity.addScaledVector(dir, accelMag * dt);
-
-  // artificial inspiral drag near the hole (keeps captures rare but inevitable)
-  if (r < DRAG_R) {
-    const k = (DRAG_R - r) / DRAG_R;
-    obj.velocity.multiplyScalar(1 - k * 0.012 * dt * 60);
-  }
-
-  // occasional tiny random perturbation so orbits slowly evolve
-  if (Math.random() < 0.004) {
-    obj.velocity.x += (Math.random() - 0.5) * 0.05;
-    obj.velocity.z += (Math.random() - 0.5) * 0.05;
-  }
-
-  pos.addScaledVector(obj.velocity, dt);
-
-  // tidal stretching visuals
-  if (r < TIDAL_R) {
-    if (obj.status !== 'unstable') {
-      obj.status = 'unstable';
-      logEvent(`${obj.name} has entered an unstable orbit.`, 'info');
-      if (obj.type === 'planet') showBanner('PLANETARY BODY DESTABILIZED');
+    if (r < radii.drag) {
+      const k = (radii.drag - r) / radii.drag;
+      obj.velocity.multiplyScalar(1 - k * 0.012 * dt * 60);
     }
-    const k = 1 - r / TIDAL_R;
-    const stretch = 1 + k * 2.2;
-    const tangent = new THREE.Vector3(-pos.z, 0, pos.x).normalize();
-    obj.mesh.up.copy(tangent);
-    obj.core.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
-    obj.core.lookAt(pos.clone().add(tangent));
-    if (!obj.lastLog.tidal || simTime - obj.lastLog.tidal > 3) {
-      logEvent(`Tidal forces increasing on ${obj.name}.`, r < TIDAL_R * 0.4 ? 'critical' : 'info');
-      obj.lastLog.tidal = simTime;
+    if (Math.random() < 0.004) { obj.velocity.x += (Math.random() - 0.5) * 0.05; obj.velocity.z += (Math.random() - 0.5) * 0.05; }
+
+    if (r < radii.tidal) {
+      obj.tidalPercent = THREE.MathUtils.clamp((100 * (radii.tidal - r)) / (radii.tidal - radii.capture), 0, 100);
+      if (obj.status !== 'unstable') {
+        obj.status = 'unstable';
+        logEvent(`${obj.name} has entered an unstable orbit.`, 'info');
+        if (obj.type === 'planet') showBanner('PLANETARY BODY DESTABILIZED');
+      }
+      const k = 1 - r / radii.tidal;
+      const stretch = 1 + k * 2.2;
+      const rel = pos.clone().sub(bh.mesh.position);
+      const tangent = new THREE.Vector3(-rel.z, 0, rel.x).normalize();
+      obj.mesh.up.copy(tangent);
+      obj.core.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
+      obj.core.lookAt(pos.clone().add(tangent));
+      if (!obj.lastLog.tidal || simTime - obj.lastLog.tidal > 3) {
+        logEvent(`Tidal forces increasing on ${obj.name}.`, r < radii.tidal * 0.4 ? 'critical' : 'info');
+        obj.lastLog.tidal = simTime;
+      }
+    } else {
+      obj.tidalPercent = Math.min(100 * Math.pow(radii.tidal / Math.max(r, 1), 3), 20);
+      if (obj.status === 'unstable' && r > radii.tidal * 1.15) {
+        obj.status = 'stable';
+        obj.core.scale.set(1, 1, 1);
+        obj.core.rotation.set(0, 0, 0);
+      }
     }
-  } else if (obj.status === 'unstable' && r > TIDAL_R * 1.15) {
-    obj.status = 'stable';
-    obj.core.scale.set(1, 1, 1);
-    obj.core.rotation.set(0, 0, 0);
+  } else {
+    obj.tidalPercent = 0;
   }
 
-  // slingshot / escape detection
-  if (obj._prevR !== undefined) {
-    if (obj._prevR < r && obj._closestR !== undefined && obj._closestR < 55 && !obj._slingLogged && r > obj._closestR * 1.4) {
+  if (obj._prevR !== undefined && bh) {
+    if (obj._closestR !== undefined && obj._closestR < 55 && !obj._slingLogged && r > obj._closestR * 1.4 && obj._prevR < r) {
       logEvent(`Gravitational slingshot detected: ${obj.name} is accelerating away from the singularity.`, 'info');
       obj._slingLogged = true;
     }
@@ -850,81 +968,130 @@ function stepBody(obj, dt) {
   }
   obj._prevR = r;
 
-  if (r > ESCAPE_R) {
+  if (pos.length() > ESCAPE_R) {
     logEvent(`${obj.name} has escaped the system.`, 'info');
     destroyObject(obj, 'escaped', true);
     return;
   }
 
   updateTrail(obj.trail, pos);
-
-  if (obj.moon) {
-    obj.moon.userData.angle += dt * 1.4;
-    const rr = obj.moon.userData.orbitR;
-    obj.moon.position.set(Math.cos(obj.moon.userData.angle) * rr, 0, Math.sin(obj.moon.userData.angle) * rr);
-  }
   obj.core.rotation.y += dt * 0.3;
 }
 
 /* =========================================================================
-   INFO PANEL UPDATE
+   INFO PANEL
    ========================================================================= */
+function hillRadius(obj) {
+  const dom = findDominantAttractor(obj.mesh.position, obj);
+  if (!dom) return null;
+  const r = obj.mesh.position.distanceTo(dom.mesh.position);
+  const hr = r * Math.cbrt(obj.mass / (3 * Math.max(dom.mass, 0.01)));
+  return { hr, dom };
+}
+
 function updateInfoPanel() {
   if (!selected) return;
   const $ = (id) => document.getElementById(id);
-  if (selected.isBH) {
+
+  if (selected.type === 'blackhole') {
     $('info-name').textContent = selected.name;
     $('info-type').textContent = 'SUPERMASSIVE SINGULARITY';
-    $('info-mass').textContent = CONFIG.blackHoleMass.toFixed(0) + ' M☉';
-    $('info-distance').textContent = '0.00 AU';
-    $('info-velocity').textContent = '—';
+    $('info-parent').textContent = '—';
+    $('info-mass').textContent = selected.mass.toFixed(0) + ' M☉';
+    $('info-distance').textContent = (selected.mesh.position.length() / 10).toFixed(2) + ' AU';
+    $('info-velocity').textContent = (selected.velocity.length() / 60).toFixed(2) + 'c';
     $('info-orbit').textContent = '—';
+    $('info-temp').textContent = '—';
+    $('info-age').textContent = Math.floor(selected.age).toLocaleString() + ' yrs';
     $('info-tidal').textContent = 'EXTREME';
+    $('info-influence').textContent = 'SYSTEM-WIDE';
     $('info-status').textContent = 'STABLE';
+    positionSelectionVisuals(selected.mesh.position, selected.velocity, selected.visualRadius * 2.6, null);
     return;
   }
+
   if (selected.isAsteroid) {
     const i = selected.index;
     if (!aAlive[i]) { deselect(); return; }
     const r = aPos[i].length();
+    const dom = findDominantAttractor(aPos[i], null);
     $('info-name').textContent = selected.name;
     $('info-type').textContent = 'ASTEROID';
+    $('info-parent').textContent = dom ? dom.name : '—';
     $('info-mass').textContent = aMass[i].toFixed(2) + ' Mt';
     $('info-distance').textContent = (r / 10).toFixed(2) + ' AU';
     $('info-velocity').textContent = (aVel[i].length() / 60).toFixed(2) + 'c';
-    $('info-orbit').textContent = r < TIDAL_R ? 'UNSTABLE' : 'STABLE';
-    $('info-tidal').textContent = r < TIDAL_R ? (r < TIDAL_R * 0.4 ? 'CRITICAL' : 'ELEVATED') : 'NOMINAL';
+    const { bh } = nearestBlackHole(aPos[i]);
+    const tidal = bh ? r < bhRadii(bh).tidal : false;
+    $('info-orbit').textContent = tidal ? 'UNSTABLE' : 'STABLE';
+    $('info-temp').textContent = '—';
+    $('info-age').textContent = '—';
+    $('info-tidal').textContent = tidal ? 'ELEVATED' : 'NOMINAL';
+    $('info-influence').textContent = '—';
     $('info-status').textContent = 'TRACKED';
+    positionSelectionVisuals(aPos[i], aVel[i], aRadius[i] * 3.5, null);
     return;
   }
+
   const obj = selected;
   const r = obj.mesh.position.length();
   const speed = obj.velocity.length();
+  const dom = findDominantAttractor(obj.mesh.position, obj);
   $('info-name').textContent = obj.name;
   $('info-type').textContent = obj.type.toUpperCase();
+  $('info-parent').textContent = dom ? dom.name : '—';
   $('info-mass').textContent = obj.mass.toFixed(2) + (obj.type === 'star' ? ' M☉' : ' Mt');
   $('info-distance').textContent = (r / 10).toFixed(2) + ' AU';
   $('info-velocity').textContent = (speed / 60).toFixed(2) + 'c';
   const period = ((2 * Math.PI * r) / Math.max(speed, 0.001) / 10).toFixed(1);
   $('info-orbit').textContent = `${obj.status.toUpperCase()} (T≈${period}d)`;
-  $('info-tidal').textContent = r < TIDAL_R ? (r < TIDAL_R * 0.4 ? 'CRITICAL' : 'ELEVATED') : 'NOMINAL';
+  $('info-temp').textContent = obj.type === 'star' ? Math.round(obj.tempK).toLocaleString() + ' K' : '—';
+  $('info-age').textContent = Math.floor(obj.age).toLocaleString() + ' yrs';
+  $('info-tidal').textContent = (obj.tidalPercent ?? 0).toFixed(1) + '%';
+  const hs = hillRadius(obj);
+  $('info-influence').textContent = hs ? (hs.hr / 10).toFixed(2) + ' AU' : '—';
   $('info-status').textContent = obj.status === 'unstable' ? 'DESTABILIZING' : 'NOMINAL';
 
-  // predicted trajectory (simple forward integration, doesn't mutate real state)
+  positionSelectionVisuals(obj.mesh.position, obj.velocity, obj.radius * 4, hs);
+
+  // predicted trajectory: integrate against the single strongest local attractor
   const p = obj.mesh.position.clone();
   const v = obj.velocity.clone();
   const arr = predictGeo.attributes.position.array;
   const steps = 80;
   for (let i = 0; i < steps; i++) {
-    const rr = Math.max(p.length(), 1);
-    const a = -(CONFIG.G * CONFIG.blackHoleMass) / (rr * rr);
-    v.addScaledVector(p.clone().normalize(), a * 0.6);
+    const dominant = findDominantAttractor(p, null);
+    if (dominant) {
+      const rel = dominant.mesh.position.clone().sub(p);
+      const dist = Math.max(rel.length(), 1);
+      const a = (CONFIG.G * dominant.mass) / (dist * dist);
+      v.addScaledVector(rel.normalize(), a * 0.6);
+    }
     p.addScaledVector(v, 0.6);
     arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z;
-    if (p.length() < CAPTURE_R) { for (let j = i + 1; j < steps; j++) { arr[j*3]=p.x;arr[j*3+1]=p.y;arr[j*3+2]=p.z; } break; }
+    const { bh: pbh, dist: pr } = nearestBlackHole(p);
+    if (pbh && pr < bhRadii(pbh).capture) { for (let j = i + 1; j < steps; j++) { arr[j*3]=p.x;arr[j*3+1]=p.y;arr[j*3+2]=p.z; } break; }
   }
   predictGeo.attributes.position.needsUpdate = true;
   predictGeo.computeLineDistances();
+}
+
+function positionSelectionVisuals(pos, vel, ringScale, hs) {
+  selectionRing.visible = true;
+  selectionRing.position.copy(pos);
+  selectionRing.scale.set(ringScale, ringScale, 1);
+  const speed = vel.length();
+  if (speed > 0.05) {
+    velocityArrow.visible = true;
+    velocityArrow.position.copy(pos);
+    velocityArrow.setDirection(vel.clone().normalize());
+    velocityArrow.setLength(Math.min(speed * 1.8 + 2, 90), 2.4, 1.3);
+  } else velocityArrow.visible = false;
+  if (hs && hs.hr > 0.5) {
+    influenceSphere.visible = true;
+    influenceSphere.position.copy(pos);
+    influenceSphere.scale.setScalar(hs.hr);
+  } else influenceSphere.visible = false;
 }
 
 /* =========================================================================
@@ -939,22 +1106,30 @@ document.getElementById('time-buttons').addEventListener('click', (e) => {
   CONFIG.paused = speed === 0;
   if (!CONFIG.paused) CONFIG.timeScale = speed;
 });
-
 document.getElementById('btn-reset').addEventListener('click', () => location.reload());
 
-function bindSlider(id, cb) {
-  const el = document.getElementById(id);
-  el.addEventListener('input', () => cb(+el.value));
-}
-bindSlider('slider-mass', (v) => { CONFIG.blackHoleMass = v; document.getElementById('val-mass').textContent = v; });
+function bindSlider(id, cb) { const el = document.getElementById(id); el.addEventListener('input', () => cb(+el.value)); }
+bindSlider('slider-mass', (v) => {
+  CONFIG.blackHoleMass = v;
+  const primary = dominantBlackHole();
+  if (primary) primary.mass = v;
+  document.getElementById('val-mass').textContent = v;
+});
 bindSlider('slider-g', (v) => { CONFIG.G = v; document.getElementById('val-g').textContent = v.toFixed(2); });
 bindSlider('slider-asteroids', (v) => { document.getElementById('val-asteroids').textContent = v; initAsteroids(v); });
-bindSlider('slider-disk', (v) => { CONFIG.diskBrightness = v; diskMat.uniforms.uBrightness.value = v; document.getElementById('val-disk').textContent = v.toFixed(2); });
+bindSlider('slider-disk', (v) => {
+  CONFIG.diskBrightness = v;
+  for (const bh of blackHoles()) bh.diskMat.uniforms.uBrightness.value = v;
+  document.getElementById('val-disk').textContent = v.toFixed(2);
+});
 bindSlider('slider-lens', (v) => { CONFIG.lensStrength = v; document.getElementById('val-lens').textContent = v.toFixed(2); });
 
-document.getElementById('btn-follow').addEventListener('click', () => { if (selected && !selected.isAsteroid && !selected.isBH) followTarget = selected; });
-document.getElementById('btn-return').addEventListener('click', () => { followTarget = null; controls.target.set(0, 0, 0); });
-
+document.getElementById('btn-follow').addEventListener('click', () => { if (selected && !selected.isAsteroid) followTarget = selected; });
+document.getElementById('btn-return').addEventListener('click', () => {
+  followTarget = null;
+  const primary = dominantBlackHole();
+  controls.target.copy(primary ? primary.mesh.position : new THREE.Vector3());
+});
 document.getElementById('btn-help').addEventListener('click', () => document.getElementById('help-modal').classList.remove('hidden'));
 document.getElementById('btn-help-close').addEventListener('click', () => document.getElementById('help-modal').classList.add('hidden'));
 
@@ -967,29 +1142,18 @@ const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, windo
 composer.addPass(bloomPass);
 
 const lensShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    uBH: { value: new THREE.Vector2(0.5, 0.5) },
-    uStrength: { value: 1.0 },
-    uAspect: { value: window.innerWidth / window.innerHeight },
-  },
+  uniforms: { tDiffuse: { value: null }, uBH: { value: new THREE.Vector2(0.5, 0.5) }, uStrength: { value: 1.0 }, uAspect: { value: window.innerWidth / window.innerHeight } },
   vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
   fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform vec2 uBH;
-    uniform float uStrength;
-    uniform float uAspect;
+    uniform sampler2D tDiffuse; uniform vec2 uBH; uniform float uStrength; uniform float uAspect;
     varying vec2 vUv;
     void main(){
-      vec2 diff = vUv - uBH;
-      diff.x *= uAspect;
+      vec2 diff = vUv - uBH; diff.x *= uAspect;
       float dist = length(diff);
       vec2 dirn = dist > 0.0001 ? normalize(diff) : vec2(0.0);
       float bend = uStrength * 0.09 * exp(-dist * 9.0);
-      vec2 offset = dirn * bend;
-      offset.x /= uAspect;
-      vec2 sampleUv = clamp(vUv - offset, 0.0, 1.0);
-      gl_FragColor = texture2D(tDiffuse, sampleUv);
+      vec2 offset = dirn * bend; offset.x /= uAspect;
+      gl_FragColor = texture2D(tDiffuse, clamp(vUv - offset, 0.0, 1.0));
     }
   `,
 };
@@ -999,9 +1163,19 @@ composer.addPass(lensPass);
 /* =========================================================================
    INITIAL POPULATION
    ========================================================================= */
+createBlackHole({ position: new THREE.Vector3(), velocity: new THREE.Vector3(), mass: CONFIG.blackHoleMass, name: 'SAGITTARIUS PRIME' });
 for (let i = 0; i < 5; i++) createStar();
-for (let i = 0; i < 8; i++) createPlanet();
+const initialPlanets = [];
+for (let i = 0; i < 8; i++) initialPlanets.push(createPlanet());
 for (let i = 0; i < 3; i++) createComet();
+// demonstrate a nested orbit: attach a moon to one of the starting planets
+{
+  const parent = initialPlanets[Math.floor(Math.random() * initialPlanets.length)];
+  const offset = new THREE.Vector3(parent.radius * 5, 0, 0);
+  const moonPos = parent.mesh.position.clone().add(offset);
+  const moonVel = orbitalVelocity(moonPos, parent.mesh.position, parent.mass, 1).add(parent.velocity);
+  createMoon({ position: moonPos, velocity: moonVel, name: 'LUNA-01' });
+}
 logEvent('Observatory systems online. Gravitational field stabilized.', 'info');
 
 /* =========================================================================
@@ -1018,26 +1192,29 @@ function animate() {
     simTime += dt;
     for (const obj of [...bodies]) stepBody(obj, dt);
     updateAsteroids(dt);
-    diskMat.uniforms.uTime.value += dt;
+    for (const bh of blackHoles()) bh.diskMat.uniforms.uTime.value += dt;
     diskLight.intensity = 5 + Math.sin(simTime * 0.6) * 1.2;
   }
 
   document.getElementById('clock-value').textContent = fmtClock(simTime);
 
   if (followTarget) {
-    if (!bodies.includes(followTarget)) { followTarget = null; }
-    else controls.target.lerp(followTarget.mesh.position, 0.08);
+    const stillExists = bodies.includes(followTarget) || (followTarget.isAsteroid && aAlive[followTarget.index]);
+    if (!stillExists) followTarget = null;
+    else controls.target.lerp(followTarget.isAsteroid ? aPos[followTarget.index] : followTarget.mesh.position, 0.08);
   }
 
-  // billboard the photon ring halo & shadow to always face camera handled by Sprite automatically
-  photonSprite.material.rotation += rawDt * 0.05;
+  for (const bh of blackHoles()) bh.photonSprite.material.rotation += rawDt * 0.05;
 
   if (selected) updateInfoPanel();
+  else { selectionRing.visible = velocityArrow.visible = influenceSphere.visible = false; }
 
-  // project black hole for lensing shader
-  const ndc = new THREE.Vector3(0, 0, 0).project(camera);
-  lensPass.uniforms.uBH.value.set((ndc.x + 1) / 2, (ndc.y + 1) / 2);
-  lensPass.uniforms.uStrength.value = CONFIG.lensStrength * (ndc.z < 1 ? 1 : 0);
+  const dominant = dominantBlackHole();
+  if (dominant) {
+    const ndc = dominant.mesh.position.clone().project(camera);
+    lensPass.uniforms.uBH.value.set((ndc.x + 1) / 2, (ndc.y + 1) / 2);
+    lensPass.uniforms.uStrength.value = CONFIG.lensStrength * (ndc.z < 1 ? 1 : 0);
+  }
   lensPass.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
 
   composer.render();
