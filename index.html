@@ -33,6 +33,8 @@
     </div>
   </header>
 
+  <div id="breadcrumb-bar">UNIVERSE</div>
+
   <!-- LEFT: CONTROL DECK -->
   <aside id="control-deck" class="panel">
     <div class="panel-head"><span>CONTROL DECK</span><span class="corner"></span></div>
@@ -82,8 +84,11 @@
 
     <div class="panel-section">
       <div class="section-title">CAMERA</div>
-      <button id="btn-follow" class="wide-btn" disabled>&#9673; FOLLOW OBJECT</button>
-      <button id="btn-return" class="wide-btn">&#8962; RETURN TO BLACK HOLE</button>
+      <div class="cam-mode-buttons">
+        <button data-mode="follow" id="btn-follow" class="tbtn" disabled>FOLLOW</button>
+        <button data-mode="orbit" id="btn-orbit" class="tbtn" disabled>AUTO-ORBIT</button>
+      </div>
+      <button id="btn-return" class="wide-btn">&#8962; BLACK HOLE VIEW</button>
     </div>
 
     <div class="panel-section">
@@ -112,6 +117,7 @@
         <div class="info-row"><span>GRAV. INFLUENCE</span><b id="info-influence">-</b></div>
         <div class="info-row"><span>STATUS</span><b id="info-status">-</b></div>
       </div>
+      <button id="btn-enter-system" class="wide-btn accent hidden">&#8853; ENTER STAR SYSTEM</button>
       <button id="btn-delete-obj" class="wide-btn danger">&#10005; DELETE OBJECT</button>
     </div>
 
@@ -158,9 +164,10 @@
         <p><b>Drag</b> — orbit camera &nbsp; <b>Scroll / pinch</b> — zoom</p>
         <p><b>Click / tap</b> an object — select &amp; inspect, with velocity vector, orbit path, and sphere of influence shown</p>
         <p><b>Right-click / long-press</b> empty space, or the <b>Create Object</b> button — open the spawn menu</p>
-        <p>While placing an object: <b>click</b> for an automatic stable orbit, or <b>click-drag</b> to aim and set its exact launch velocity — release to fire it into the field.</p>
+        <p>While placing an object: <b>click</b> for an automatic stable orbit, or <b>click-drag</b> to aim and set its exact launch velocity — a live predicted path is shown, so you can engineer precise gravitational slingshots before releasing.</p>
         <p>Moons need a planet selected first — they'll be launched into orbit around it.</p>
-        <p>Watch for objects that stray too close to a black hole: tidal forces will stretch and consume them.</p>
+        <p>Select a star and choose <b>Enter Star System</b> to smoothly fly in and frame its planets and moons. Use <b>Follow</b> / <b>Auto-Orbit</b> to keep the camera locked on any selected object, or <b>Black Hole View</b> to fly back out. The bar under the header shows your current position in the hierarchy.</p>
+        <p>Objects that stray too close to a black hole fragment, spiral in, and briefly flare the accretion disk as they're consumed.</p>
       </div>
       <button id="btn-help-close" class="wide-btn accent">UNDERSTOOD</button>
     </div>
