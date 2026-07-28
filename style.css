@@ -115,6 +115,9 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:var(--bg);overflo
 }
 
 .cam-mode-buttons{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:6px;}
+.save-load-row{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-top:6px;}
+.save-load-row .wide-btn{margin-top:0;}
+#save-status{font-size:9px;color:var(--cyan);letter-spacing:1px;margin-top:6px;min-height:11px;opacity:0.85;}
 
 /* placement panel (create/drag-launch flow) */
 #placement-panel{
