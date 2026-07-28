@@ -116,6 +116,14 @@
 
   <!-- RIGHT: INFO + LOG -->
   <aside id="right-deck">
+    <div id="browser-panel" class="panel collapsed">
+      <div class="panel-head browser-toggle" id="browser-head-toggle">
+        <span>OBJECT BROWSER <span id="browser-count"></span></span>
+        <span class="browser-chevron">&#9656;</span>
+      </div>
+      <div id="browser-body" class="browser-body"></div>
+    </div>
+
     <div id="info-panel" class="panel hidden">
       <div class="panel-head"><span>CELESTIAL OBJECT</span><span class="corner"></span></div>
       <div class="info-body">
@@ -187,6 +195,7 @@
         <p>Time runs from <b>0.1x</b> to <b>1000x</b> — speed it up to watch stars age: they swell into red giants (or supergiants), then quietly fade to a white dwarf, or for massive stars, go supernova and collapse into a neutron star or a brand new black hole.</p>
         <p>Two black holes that drift close will orbit each other, slowly decay, and eventually merge into one larger black hole — with a rippling gravitational-wave shockwave through the whole scene.</p>
         <p><b>Generate New Universe</b> builds a fresh, randomized system from scratch. <b>Save</b> / <b>Load</b> keep a snapshot in this browser; <b>Export</b> downloads it as a .json file you can keep or share.</p>
+        <p>The <b>Object Browser</b> (top of the right panel) lists everything currently in the sim — click any entry to select it and fly there. Log entries marked with <b>↗</b> are clickable too, jumping you straight to where that event happened.</p>
       </div>
       <button id="btn-help-close" class="wide-btn accent">UNDERSTOOD</button>
     </div>

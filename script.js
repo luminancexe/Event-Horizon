@@ -652,7 +652,7 @@ function updateAsteroids(dt) {
       if (asteroidCaptureFxCooldown <= 0) {
         triggerDiskBurst(bh, 0.08);
         burstAtDisk(pos.clone());
-        logEvent('An asteroid has been consumed by the black hole.', 'info');
+        logEvent('An asteroid has been consumed by the black hole.', 'info', pos);
         asteroidCaptureFxCooldown = 1.5;
       }
       spawnAsteroid(i);
@@ -688,7 +688,7 @@ function updateAsteroids(dt) {
           aVel[j].addScaledVector(n1, -0.6);
           aPos[i].addScaledVector(n1, 0.15);
           aPos[j].addScaledVector(n1, -0.15);
-          if (collisionLogCooldown <= 0) { logEvent('ASTEROID COLLISION DETECTED', 'info'); collisionLogCooldown = 4; }
+          if (collisionLogCooldown <= 0) { logEvent('ASTEROID COLLISION DETECTED', 'info', aPos[i]); collisionLogCooldown = 4; }
         }
       }
     }
@@ -846,7 +846,7 @@ document.getElementById('btn-enter-system').addEventListener('click', () => {
   flyCameraTo(star.mesh.position, radius * 1.5 + 30, 1400);
   followTarget = star;
   setCameraMode('follow');
-  logEvent(`Entering the ${star.name} system.`, 'info');
+  logEvent(`Entering the ${star.name} system.`, 'info', star.mesh.position);
 });
 
 /* =========================================================================
@@ -975,7 +975,7 @@ function endPlacementDrag(p) {
   }
 
   spawnFromPlacement(placement.type, dragStart, velocity, { name, mass, size, tempK, parentBody: placement.parentBody });
-  logEvent(`New ${placement.type} "${name}" deployed into the field.`, 'info');
+  logEvent(`New ${placement.type} "${name}" deployed into the field.`, 'info', dragStart);
   cancelPlacement();
 }
 function spawnFromPlacement(type, pos, vel, props) {
@@ -1088,8 +1088,8 @@ function disintegrate(obj, bh) {
   triggerDiskBurst(bh, 0.35 + obj.mass * 0.01);
   spawnEnergyRing(bh.mesh.position, obj.type === 'star' ? 0xfff2c8 : 0xffb066);
 
-  logEvent(`${obj.name} has fragmented under extreme tidal stress.`, 'critical');
-  logEvent(`${obj.name} has been consumed by the black hole.`, 'critical');
+  logEvent(`${obj.name} has fragmented under extreme tidal stress.`, 'critical', obj.mesh.position);
+  logEvent(`${obj.name} has been consumed by the black hole.`, 'critical', obj.mesh.position);
   showBanner(obj.type === 'planet' ? 'PLANETARY BODY DESTROYED' : obj.type === 'star' ? 'TIDAL DISRUPTION COMPLETE' : `${obj.name} CONSUMED`);
 
   destroyObject(obj, 'captured', true); // true: skip the generic burst/log, we already did a bespoke one above
@@ -1112,7 +1112,7 @@ function updateStarLifecycle(obj) {
     obj.core.material.color.set(giantColor);
     obj.glow.material.color.set(giantColor);
     obj.glow.scale.set(obj.radius * 7 * obj.lifecycleScale * 1.3, obj.radius * 7 * obj.lifecycleScale * 1.3, 1);
-    logEvent(`${obj.name} has swelled into a ${obj.isHighMass ? 'red supergiant' : 'red giant'}.`, 'info');
+    logEvent(`${obj.name} has swelled into a ${obj.isHighMass ? 'red supergiant' : 'red giant'}.`, 'info', obj.mesh.position);
     showBanner(`${obj.name}: ${obj.isHighMass ? 'RED SUPERGIANT' : 'RED GIANT'} PHASE`);
   }
 }
@@ -1127,14 +1127,14 @@ function triggerSupernova(obj) {
     obj.glow.material.color.set(0xeaf6ff);
     obj.glow.scale.set(obj.radius * 3, obj.radius * 3, 1);
     obj.status = 'stable';
-    logEvent(`${obj.name} has shed its outer layers and collapsed into a white dwarf.`, 'info');
+    logEvent(`${obj.name} has shed its outer layers and collapsed into a white dwarf.`, 'info', obj.mesh.position);
     showBanner(`${obj.name}: WHITE DWARF FORMED`);
     return;
   }
 
   obj.stage = 'remnant';
-  logEvent('SUPERNOVA DETECTED', 'critical');
-  logEvent(`STAR ${obj.name} HAS COLLAPSED.`, 'critical');
+  logEvent('SUPERNOVA DETECTED', 'critical', obj.mesh.position);
+  logEvent(`STAR ${obj.name} HAS COLLAPSED.`, 'critical', obj.mesh.position);
   showBanner('SUPERNOVA DETECTED');
   cameraShake(1.1, 900);
 
@@ -1162,10 +1162,10 @@ function triggerSupernova(obj) {
   const remnantMass = obj.mass * 0.35;
   if (obj.mass > 17) {
     createBlackHole({ position: obj.mesh.position.clone(), velocity: obj.velocity.clone(), mass: Math.max(remnantMass * 40, 350), name: obj.name + ' REMNANT' });
-    logEvent(`${obj.name} has collapsed into a new black hole.`, 'critical');
+    logEvent(`${obj.name} has collapsed into a new black hole.`, 'critical', obj.mesh.position);
   } else {
     createNeutronStar({ position: obj.mesh.position.clone(), velocity: obj.velocity.clone(), mass: remnantMass, name: obj.name + '-NS' });
-    logEvent(`${obj.name} has collapsed into a neutron star.`, 'info');
+    logEvent(`${obj.name} has collapsed into a neutron star.`, 'info', obj.mesh.position);
   }
 
   destroyObject(obj, 'supernova', true);
@@ -1259,8 +1259,8 @@ function mergeBlackHoles(a, b) {
   const vel = a.velocity.clone().multiplyScalar(a.mass).add(b.velocity.clone().multiplyScalar(b.mass)).divideScalar(totalMass);
   const name = 'SGR-' + Math.floor(100 + Math.random() * 900) + ' MERGED';
 
-  logEvent('BLACK HOLE MERGER DETECTED', 'critical');
-  logEvent(`${a.name} and ${b.name} have merged into a single, more massive black hole.`, 'critical');
+  logEvent('BLACK HOLE MERGER DETECTED', 'critical', pos);
+  logEvent(`${a.name} and ${b.name} have merged into a single, more massive black hole.`, 'critical', pos);
   showBanner('BLACK HOLE MERGER DETECTED');
   cameraShake(1.7, 1300);
 
@@ -1293,13 +1293,19 @@ function fmtClock(t) {
   const s = String(Math.floor(t % 60)).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
-function logEvent(text, level = 'info') {
+function logEvent(text, level = 'info', position = null) {
   const body = document.getElementById('log-body');
   const div = document.createElement('div');
-  div.className = 'log-entry event-' + level;
-  div.innerHTML = `<span class="log-time">[${fmtClock(simTime)}]</span>${text}`;
+  div.className = 'log-entry event-' + level + (position ? ' clickable' : '');
+  const yearLabel = 'YEAR ' + Math.max(0, Math.floor(simYears)).toLocaleString();
+  div.innerHTML = `<span class="log-time">${yearLabel}${position ? ' \u2197' : ''}</span>${text}`;
+  if (position) {
+    const p = position.clone();
+    div.title = 'Click to jump to this location';
+    div.addEventListener('click', () => flyCameraTo(p, 55, 1200));
+  }
   body.prepend(div);
-  while (body.children.length > 60) body.removeChild(body.lastChild);
+  while (body.children.length > 80) body.removeChild(body.lastChild);
 }
 
 /* =========================================================================
@@ -1330,7 +1336,7 @@ function stepBody(obj, dt) {
       obj.tidalPercent = THREE.MathUtils.clamp((100 * (radii.tidal - r)) / (radii.tidal - radii.capture), 0, 100);
       if (obj.status !== 'unstable') {
         obj.status = 'unstable';
-        logEvent(`${obj.name} has entered an unstable orbit.`, 'info');
+        logEvent(`${obj.name} has entered an unstable orbit.`, 'info', pos);
         if (obj.type === 'planet') showBanner('PLANETARY BODY DESTABILIZED');
       }
       const k = 1 - r / radii.tidal;
@@ -1342,7 +1348,7 @@ function stepBody(obj, dt) {
       obj.core.scale.set(base / Math.sqrt(stretch), base * stretch, base / Math.sqrt(stretch));
       obj.core.lookAt(pos.clone().add(tangent));
       if (!obj.lastLog.tidal || simTime - obj.lastLog.tidal > 3) {
-        logEvent(`Tidal forces increasing on ${obj.name}.`, r < radii.tidal * 0.4 ? 'critical' : 'info');
+        logEvent(`Tidal forces increasing on ${obj.name}.`, r < radii.tidal * 0.4 ? 'critical' : 'info', pos);
         obj.lastLog.tidal = simTime;
       }
     } else {
@@ -1359,7 +1365,7 @@ function stepBody(obj, dt) {
 
   if (obj._prevR !== undefined && bh) {
     if (obj._closestR !== undefined && obj._closestR < 55 && !obj._slingLogged && r > obj._closestR * 1.4 && obj._prevR < r) {
-      logEvent(`Gravitational slingshot detected: ${obj.name} is accelerating away from the singularity.`, 'info');
+      logEvent(`Gravitational slingshot detected: ${obj.name} is accelerating away from the singularity.`, 'info', pos);
       showBanner('GRAVITATIONAL SLINGSHOT DETECTED');
       obj._slingLogged = true;
     }
@@ -1368,7 +1374,7 @@ function stepBody(obj, dt) {
   obj._prevR = r;
 
   if (pos.length() > ESCAPE_R) {
-    logEvent(`${obj.name} has escaped the system.`, 'info');
+    logEvent(`${obj.name} has escaped the system.`, 'info', pos);
     destroyObject(obj, 'escaped', true);
     return;
   }
@@ -1483,6 +1489,40 @@ function positionSelectionVisuals(pos, vel, ringScale, hs) {
     influenceSphere.scale.setScalar(hs.hr);
   } else influenceSphere.visible = false;
 }
+
+/* =========================================================================
+   OBJECT BROWSER — a searchable-by-eye list of every body in the sim
+   ========================================================================= */
+let browserCollapsed = true;
+const BROWSER_LABELS = { blackhole: 'BLACK HOLES', star: 'STARS', planet: 'PLANETS', moon: 'MOONS', comet: 'COMETS', neutron: 'NEUTRON STARS' };
+function refreshObjectBrowser() {
+  document.getElementById('browser-count').textContent = bodies.length ? `(${bodies.length})` : '';
+  if (browserCollapsed) return;
+  const groups = { blackhole: [], star: [], planet: [], moon: [], comet: [], neutron: [] };
+  for (const b of bodies) if (groups[b.type]) groups[b.type].push(b);
+  let html = '';
+  for (const key of ['blackhole', 'star', 'planet', 'moon', 'comet', 'neutron']) {
+    const list = groups[key];
+    if (!list.length) continue;
+    html += `<div class="browser-group">${BROWSER_LABELS[key]} (${list.length})</div>`;
+    for (const b of list) html += `<div class="browser-item" data-id="${b.id}">${b.name}</div>`;
+  }
+  document.getElementById('browser-body').innerHTML = html || '<div class="browser-empty">No objects yet — try Generate New Universe.</div>';
+}
+document.getElementById('browser-head-toggle').addEventListener('click', () => {
+  browserCollapsed = !browserCollapsed;
+  document.getElementById('browser-panel').classList.toggle('collapsed', browserCollapsed);
+  refreshObjectBrowser();
+});
+document.getElementById('browser-body').addEventListener('click', (e) => {
+  const item = e.target.closest('.browser-item');
+  if (!item) return;
+  const obj = bodies.find((b) => b.id === +item.dataset.id);
+  if (!obj) return;
+  select(obj);
+  flyCameraTo(obj.mesh.position, Math.max(obj.radius * 8, 40), 1200);
+});
+setInterval(refreshObjectBrowser, 1500);
 
 /* =========================================================================
    UI WIRING
@@ -1645,6 +1685,7 @@ function generateUniverse() {
 
   logEvent(`New universe generated: ${numBH} black hole${numBH > 1 ? 's' : ''}, ${numStars} stars, ${numPlanets} planets, ${numMoons} moons, ${numComets} comets, ${asteroidCount} asteroids.`, 'info');
   showBanner('NEW UNIVERSE GENERATED');
+  refreshObjectBrowser();
 }
 
 function serializeUniverse() {
@@ -1726,6 +1767,7 @@ function deserializeUniverse(data) {
 
   logEvent('Universe loaded from saved data.', 'info');
   showBanner('UNIVERSE LOADED');
+  refreshObjectBrowser();
 }
 
 const SAVE_KEY = 'eventHorizonSave_v1';
@@ -1772,9 +1814,28 @@ document.getElementById('btn-export').addEventListener('click', () => {
    MAIN LOOP
    ========================================================================= */
 const clock = new THREE.Clock();
+let perfAccum = 0, perfSamples = 0, perfScaled = false;
 function animate() {
   requestAnimationFrame(animate);
   const rawDt = Math.min(clock.getDelta(), 0.05);
+
+  // automatic performance scaling: if the framerate stays low for a
+  // sustained stretch, quietly thin out the most expensive layer (the
+  // asteroid field) once, rather than letting the whole sim bog down
+  perfAccum += rawDt; perfSamples++;
+  if (perfSamples >= 90) {
+    const avgDt = perfAccum / perfSamples;
+    if (!perfScaled && avgDt > 0.033 && aPos.length > 150) {
+      perfScaled = true;
+      const newCount = Math.max(150, Math.floor(aPos.length * 0.6));
+      initAsteroids(newCount);
+      CONFIG.asteroidCount = newCount;
+      document.getElementById('slider-asteroids').value = newCount;
+      document.getElementById('val-asteroids').textContent = newCount;
+      logEvent('Performance mode engaged — asteroid density reduced automatically for a smoother framerate.', 'info');
+    }
+    perfAccum = 0; perfSamples = 0;
+  }
 
   if (cameraTween) {
     const t = Math.min((performance.now() - cameraTween.start) / cameraTween.duration, 1);
