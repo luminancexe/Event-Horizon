@@ -434,6 +434,7 @@ class CelestialBody {
     this.lifecycleScale = 1;
     this.lastLog = {};
     this._destroyed = false;
+    this._createdAt = performance.now(); // grace period before this body can collide with anything
   }
   // convenience accessor — most existing code still reads obj.mesh.position
   // directly, but this satisfies the "Position (x,y,z)" field expectation
@@ -749,7 +750,11 @@ function updateAsteroids(dt) {
           aVel[j].addScaledVector(n1, -0.6);
           aPos[i].addScaledVector(n1, 0.15);
           aPos[j].addScaledVector(n1, -0.15);
-          if (collisionLogCooldown <= 0) { logEvent('ASTEROID COLLISION DETECTED', 'info', aPos[i]); collisionLogCooldown = 4; }
+          if (collisionLogCooldown <= 0) {
+            logEvent('ASTEROID COLLISION DETECTED', 'info', aPos[i]);
+            particleBurst(aPos[i], { count: 18, color: 0xcabaa0, spread: 2, size: 0.8, duration: 700, growth: 2 });
+            collisionLogCooldown = 4;
+          }
         }
       }
     }
@@ -1291,13 +1296,14 @@ function destroyObject(obj, reason, silent = false) {
    BLACK HOLE INTERACTIONS — pairs that stray close orbit, decay, and merge
    ========================================================================= */
 function updateBlackHoleInteractions(dt) {
+  const now = performance.now();
   const bhs = blackHoles();
   for (let i = 0; i < bhs.length; i++) {
     const a = bhs[i];
-    if (a._destroyed) continue;
+    if (a._destroyed || now - a._createdAt < COLLISION_GRACE_MS) continue;
     for (let j = i + 1; j < bhs.length; j++) {
       const b = bhs[j];
-      if (b._destroyed) continue;
+      if (b._destroyed || now - b._createdAt < COLLISION_GRACE_MS) continue;
       const d = a.mesh.position.distanceTo(b.mesh.position);
       const mergeR = (a.visualRadius + b.visualRadius) * 1.15;
       const decayR = (a.visualRadius + b.visualRadius) * 9;
@@ -1345,6 +1351,89 @@ function mergeBlackHoles(a, b) {
   destroyObject(a, 'merged', true);
   destroyObject(b, 'merged', true);
   createBlackHole({ position: pos, velocity: vel, mass: totalMass, name });
+}
+
+/* =========================================================================
+   COLLISION SYSTEM — any two non-black-hole massive bodies that touch
+   either merge (low relative speed) or shatter into debris (high speed).
+   Black-hole collisions are already handled by the tidal capture system;
+   asteroid-asteroid collisions have their own lightweight bounce below.
+   ========================================================================= */
+const COLLISION_MERGE_SPEED = 12; // relative speed below which bodies merge instead of fragmenting
+const COLLISION_GRACE_MS = 900;   // newly spawned bodies are briefly immune (e.g. a moon placed close to its planet)
+
+function checkBodyCollisions() {
+  const now = performance.now();
+  const massive = bodies.filter((b) => !b._destroyed && b.type !== 'blackhole' && now - b._createdAt > COLLISION_GRACE_MS);
+  for (let i = 0; i < massive.length; i++) {
+    const a = massive[i];
+    if (a._destroyed) continue;
+    for (let j = i + 1; j < massive.length; j++) {
+      const b = massive[j];
+      if (b._destroyed) continue;
+      const d = a.mesh.position.distanceTo(b.mesh.position);
+      if (d < (a.radius + b.radius) * 0.85) { handleCollision(a, b); return; }
+    }
+  }
+}
+
+function spawnMergedBody(type, pos, vel, mass, radius, name, flavor) {
+  const opts = { position: pos, velocity: vel, mass, size: radius, name };
+  let obj;
+  switch (type) {
+    case 'star': obj = createStar({ ...opts, tempK: flavor?.tempK }); break;
+    case 'moon': obj = createMoon(opts); break;
+    case 'comet': obj = createComet(opts); break;
+    case 'neutron': obj = createNeutronStar(opts); break;
+    default: obj = createPlanet(opts); break;
+  }
+  if (type === 'star' && flavor) {
+    obj.age = flavor.age; obj.stage = flavor.stage; obj.lifecycleScale = flavor.lifecycleScale;
+    obj.isHighMass = mass > 11;
+    if (obj.stage !== 'main_sequence') obj.core.scale.setScalar(obj.lifecycleScale);
+  }
+  return obj;
+}
+
+function handleCollision(a, b) {
+  if (a._destroyed || b._destroyed) return;
+  const relSpeed = a.velocity.clone().sub(b.velocity).length();
+  const totalMass = a.mass + b.mass;
+  const mergedPos = a.mesh.position.clone().multiplyScalar(a.mass).add(b.mesh.position.clone().multiplyScalar(b.mass)).divideScalar(totalMass);
+  const mergedVel = a.velocity.clone().multiplyScalar(a.mass).add(b.velocity.clone().multiplyScalar(b.mass)).divideScalar(totalMass);
+  const big = a.mass >= b.mass ? a : b;
+  const small = a.mass >= b.mass ? b : a;
+
+  if (relSpeed < COLLISION_MERGE_SPEED) {
+    // gentle encounter: the larger body absorbs the smaller one, conserving momentum and mass
+    const newRadius = Math.cbrt(Math.pow(a.radius, 3) + Math.pow(b.radius, 3));
+    logEvent(`${small.name} has merged into ${big.name}.`, 'critical', mergedPos);
+    showBanner(`${big.name}: MASS ABSORBED`);
+    particleBurst(mergedPos, { count: 60, color: 0xffe6b0, spread: a.radius + b.radius, size: 1.6, duration: 1400, growth: 4 });
+    const name = big.name, type = big.type, flavor = big.type === 'star' ? big : null;
+    destroyObject(a, 'merged', true);
+    destroyObject(b, 'merged', true);
+    spawnMergedBody(type, mergedPos, mergedVel, totalMass, newRadius, name, flavor);
+  } else {
+    // violent impact: both bodies shatter into a debris field
+    logEvent(`${a.name} and ${b.name} collided at high velocity and shattered.`, 'critical', mergedPos);
+    showBanner('HIGH-VELOCITY COLLISION');
+    cameraShake(0.8, 500);
+    particleBurst(mergedPos, { count: 140, color: 0xffcf9e, spread: (a.radius + b.radius) * 2, size: 2.2, duration: 2000, growth: 8 });
+    spawnEnergyRing(mergedPos, 0xffb066, 30, 1400);
+
+    const debrisCount = THREE.MathUtils.clamp(Math.floor(totalMass / 3), 3, 10);
+    for (let k = 0; k < debrisCount; k++) {
+      if (!aPos.length) break;
+      const idx = Math.floor(Math.random() * aPos.length);
+      const dir = new THREE.Vector3(Math.random() - 0.5, (Math.random() - 0.5) * 0.3, Math.random() - 0.5).normalize();
+      const p = mergedPos.clone().addScaledVector(dir, (a.radius + b.radius) * (0.5 + Math.random()));
+      const v = mergedVel.clone().addScaledVector(dir, relSpeed * 0.4 + Math.random() * 8);
+      spawnAsteroid(idx, p, v, Math.max((totalMass / debrisCount) * 0.3, 0.1), Math.max((a.radius + b.radius) / debrisCount, 0.3));
+    }
+    destroyObject(a, 'collided', true);
+    destroyObject(b, 'collided', true);
+  }
 }
 
 /* =========================================================================
@@ -2000,6 +2089,7 @@ function animate() {
       integrateBodiesVerlet(subDtBody);
       for (const obj of [...bodies]) postStepBody(obj, subDtBody);
       updateBlackHoleInteractions(subDtBody);
+      checkBodyCollisions();
     }
 
     const nAst = Math.min(nBody, MAX_SUBSTEPS_ASTEROID);
