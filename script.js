@@ -16,6 +16,8 @@ const CONFIG = {
   asteroidCount: 400,
   diskBrightness: 1.0,
   lensStrength: 1.0,
+  gravityEnabled: true,      // can be switched off for performance A/B testing
+  debugMode: false,
 };
 
 const BASE_HORIZON   = 9;      // visual radius of a "reference mass" black hole
@@ -39,6 +41,7 @@ const MAX_SUBSTEPS_ASTEROID = 8;
 
 let simTime = 0;
 let simYears = 0;
+let gravityCalcCount = 0; // reset each frame, used by the debug overlay
 
 /* =========================================================================
    RENDERER / SCENE / CAMERA
@@ -401,6 +404,74 @@ influenceSphere.visible = false;
 scene.add(influenceSphere);
 
 /* =========================================================================
+   OBJECT ARCHITECTURE — class hierarchy for every simulated body.
+   The factory functions below build the Three.js visuals (mesh, glow,
+   disk, etc.) exactly as before, then hand them to one of these classes.
+   Everything else in the file (physics, selection, UI, effects) only ever
+   touches the common fields defined here (mass, mesh, velocity,
+   acceleration, trail, ...), so swapping plain objects for real classes
+   required no changes anywhere else.
+   ========================================================================= */
+class CelestialBody {
+  constructor(opts) {
+    this.id = idCounter++;
+    this.name = opts.name;
+    this.type = opts.type;
+    this.mass = opts.mass;
+    this.radius = opts.radius;
+    this.mesh = opts.mesh;         // THREE.Group / Mesh — world position lives here
+    this.core = opts.core;         // the raycastable/selectable mesh
+    this.velocity = opts.velocity ? opts.velocity.clone() : new THREE.Vector3();
+    this.acceleration = new THREE.Vector3(); // persisted for Velocity Verlet integration
+    this.rotationSpeed = opts.rotationSpeed ?? 0.3;
+    this.temperature = opts.temperature ?? null;
+    this.trail = opts.trail ?? null;
+    this.parent = opts.parent ?? null;   // e.g. the planet a moon orbits, if known
+    this.children = [];
+    if (this.parent) this.parent.children.push(this);
+    this.status = 'stable';
+    this.age = opts.age ?? 0;
+    this.lifecycleScale = 1;
+    this.lastLog = {};
+    this._destroyed = false;
+  }
+  // convenience accessor — most existing code still reads obj.mesh.position
+  // directly, but this satisfies the "Position (x,y,z)" field expectation
+  get position() { return this.mesh.position; }
+  kineticEnergy() { return 0.5 * this.mass * this.velocity.lengthSq(); }
+}
+class Star extends CelestialBody {
+  constructor(opts) {
+    super({ ...opts, type: 'star' });
+    this.glow = opts.glow;
+    this.tempK = opts.tempK;
+    this.lifespan = opts.lifespan;
+    this.isHighMass = opts.isHighMass;
+    this.stage = 'main_sequence';
+  }
+}
+class Planet extends CelestialBody {
+  constructor(opts) { super({ ...opts, type: 'planet' }); }
+}
+class Moon extends CelestialBody {
+  constructor(opts) { super({ ...opts, type: 'moon' }); }
+}
+class Comet extends CelestialBody {
+  constructor(opts) { super({ ...opts, type: 'comet' }); this.glow = opts.glow; }
+}
+class NeutronStar extends CelestialBody {
+  constructor(opts) { super({ ...opts, type: 'neutron' }); this.glow = opts.glow; }
+}
+class BlackHole extends CelestialBody {
+  constructor(opts) {
+    super({ ...opts, type: 'blackhole' });
+    this.visualRadius = opts.visualRadius;
+    this.diskMat = opts.diskMat;
+    this.photonSprite = opts.photonSprite;
+  }
+}
+
+/* =========================================================================
    BLACK HOLE FACTORY
    ========================================================================= */
 function createBlackHole(opts = {}) {
@@ -431,15 +502,13 @@ function createBlackHole(opts = {}) {
   group.position.copy(pos);
   scene.add(group);
 
-  const obj = {
-    id: idCounter++, type: 'blackhole', name: opts.name || randomName('blackhole') + '-PRIME',
+  const obj = new BlackHole({
+    name: opts.name || randomName('blackhole') + '-PRIME',
     mesh: group, core: horizonMesh, diskMat, photonSprite, visualRadius,
     mass, radius: visualRadius,
-    velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
-    status: 'stable', age: 0, temp: null,
+    velocity: opts.velocity,
     trail: createTrail(0x554466, 0.2),
-    lastLog: {},
-  };
+  });
   bodies.push(obj);
   registerSelectable(horizonMesh, obj);
   return obj;
@@ -468,16 +537,15 @@ function createStar(opts = {}) {
   const isHighMass = mass > 11;
   const lifespan = STAR_LIFESPAN_K / Math.pow(mass, 1.6) + 3000; // heavier stars burn out much faster
 
-  const obj = {
-    id: idCounter++, type: 'star', name: opts.name || randomName('star'),
+  const obj = new Star({
+    name: opts.name || randomName('star'),
     mesh: group, core, glow,
     mass, radius: size,
-    velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.85 + Math.random() * 0.3),
-    tempK, status: 'stable', age: opts.age ?? 0,
+    velocity: opts.velocity || orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.85 + Math.random() * 0.3),
+    tempK, age: opts.age ?? 0,
     trail: createTrail(color.getHex(), 0.4),
-    lastLog: {},
-    lifespan, isHighMass, stage: 'main_sequence', lifecycleScale: 1,
-  };
+    lifespan, isHighMass,
+  });
   bodies.push(obj);
   registerSelectable(core, obj);
   return obj;
@@ -503,15 +571,13 @@ function createPlanet(opts = {}) {
   group.position.copy(pos);
   scene.add(group);
 
-  const obj = {
-    id: idCounter++, type: 'planet', name: opts.name || randomName('planet'),
+  const obj = new Planet({
+    name: opts.name || randomName('planet'),
     mesh: group, core: mesh,
     mass: opts.mass ?? (0.5 + Math.random() * 8), radius: size,
-    velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.9 + Math.random() * 0.25),
-    status: 'stable', age: 0, lifecycleScale: 1,
+    velocity: opts.velocity || orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 0.9 + Math.random() * 0.25),
     trail: createTrail(color.getHex(), 0.3),
-    lastLog: {},
-  };
+  });
   bodies.push(obj);
   registerSelectable(mesh, obj);
   return obj;
@@ -530,15 +596,14 @@ function createMoon(opts = {}) {
   group.position.copy(pos);
   scene.add(group);
 
-  const obj = {
-    id: idCounter++, type: 'moon', name: opts.name || randomName('moon'),
+  const obj = new Moon({
+    name: opts.name || randomName('moon'),
     mesh: group, core: mesh,
     mass: opts.mass ?? (0.02 + Math.random() * 0.3), radius: size,
-    velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
-    status: 'stable', age: 0, lifecycleScale: 1,
+    velocity: opts.velocity || new THREE.Vector3(),
     trail: createTrail(color.getHex(), 0.3),
-    lastLog: {},
-  };
+    parent: opts.parent || null,
+  });
   bodies.push(obj);
   registerSelectable(mesh, obj);
   return obj;
@@ -557,15 +622,13 @@ function createComet(opts = {}) {
   group.position.copy(pos);
   scene.add(group);
 
-  const obj = {
-    id: idCounter++, type: 'comet', name: opts.name || randomName('comet'),
+  const obj = new Comet({
+    name: opts.name || randomName('comet'),
     mesh: group, core, glow,
     mass: opts.mass ?? (0.05 + Math.random() * 0.4), radius: size,
-    velocity: opts.velocity ? opts.velocity.clone() : orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 1.1 + Math.random() * 0.5),
-    status: 'stable', age: 0, lifecycleScale: 1,
+    velocity: opts.velocity || orbitalVelocity(pos, new THREE.Vector3(), CONFIG.blackHoleMass, 1.1 + Math.random() * 0.5),
     trail: createTrail(0x8fe0ff, 0.6, true),
-    lastLog: {},
-  };
+  });
   bodies.push(obj);
   registerSelectable(core, obj);
   return obj;
@@ -586,15 +649,13 @@ function createNeutronStar(opts = {}) {
   group.position.copy(pos);
   scene.add(group);
 
-  const obj = {
-    id: idCounter++, type: 'neutron', name: opts.name || randomName('star') + '-NS',
+  const obj = new NeutronStar({
+    name: opts.name || randomName('star') + '-NS',
     mesh: group, core, glow,
     mass: opts.mass ?? 6, radius: size,
-    velocity: opts.velocity ? opts.velocity.clone() : new THREE.Vector3(),
-    status: 'stable', age: 0, lifecycleScale: 1,
+    velocity: opts.velocity || new THREE.Vector3(),
     trail: createTrail(color, 0.5, true),
-    lastLog: {},
-  };
+  });
   bodies.push(obj);
   registerSelectable(core, obj);
   return obj;
@@ -710,6 +771,7 @@ function updateAsteroids(dt) {
    ========================================================================= */
 function computeAcceleration(pos, excludeObj, sources) {
   const accel = new THREE.Vector3();
+  if (!CONFIG.gravityEnabled) return accel;
   for (const s of sources) {
     if (s === excludeObj) continue;
     const dx = s.mesh.position.x - pos.x, dy = s.mesh.position.y - pos.y, dz = s.mesh.position.z - pos.z;
@@ -717,6 +779,7 @@ function computeAcceleration(pos, excludeObj, sources) {
     const distSoft = Math.sqrt(distSq);
     const f = (CONFIG.G * s.mass) / (distSq * distSoft);
     accel.x += f * dx; accel.y += f * dy; accel.z += f * dz;
+    gravityCalcCount++;
   }
   return accel;
 }
@@ -982,7 +1045,7 @@ function spawnFromPlacement(type, pos, vel, props) {
   switch (type) {
     case 'star': createStar({ position: pos, velocity: vel, mass: props.mass, size: props.size, tempK: props.tempK, name: props.name }); break;
     case 'planet': createPlanet({ position: pos, velocity: vel, mass: props.mass, size: props.size, name: props.name }); break;
-    case 'moon': createMoon({ position: pos, velocity: vel, mass: Math.min(props.mass, 30), size: Math.min(props.size, 1.5), name: props.name }); break;
+    case 'moon': createMoon({ position: pos, velocity: vel, mass: Math.min(props.mass, 30), size: Math.min(props.size, 1.5), name: props.name, parent: props.parentBody }); break;
     case 'comet': createComet({ position: pos, velocity: vel, mass: Math.min(props.mass, 2), size: Math.min(props.size, 1.2), name: props.name }); break;
     case 'blackhole': createBlackHole({ position: pos, velocity: vel, mass: Math.max(props.mass * 30, 400), name: props.name }); break;
     case 'asteroid': {
@@ -1311,11 +1374,34 @@ function logEvent(text, level = 'info', position = null) {
 /* =========================================================================
    PHYSICS STEP FOR MASSIVE BODIES (stars / planets / moons / comets / black holes)
    ========================================================================= */
-function stepBody(obj, dt) {
+/* Velocity Verlet integration, run once per sub-step across every massive
+   body together:
+     x(t+dt) = x(t) + v(t)*dt + 0.5*a(t)*dt^2
+     a(t+dt) = f(x(t+dt)) / m            (recomputed at the new positions)
+     v(t+dt) = v(t) + 0.5*(a(t)+a(t+dt))*dt
+   This conserves energy far better than the plain "accel, then velocity,
+   then position" Euler step it replaces, especially at the larger sub-step
+   sizes used when the simulation is heavily time-accelerated. */
+function integrateBodiesVerlet(dt) {
+  const list = bodies.filter((b) => !b._destroyed);
+  for (const b of list) {
+    b.mesh.position.addScaledVector(b.velocity, dt);
+    b.mesh.position.addScaledVector(b.acceleration, 0.5 * dt * dt);
+  }
+  const newAccel = list.map((b) => computeAcceleration(b.mesh.position, b, bodies));
+  for (let i = 0; i < list.length; i++) {
+    const b = list[i];
+    b.velocity.addScaledVector(b.acceleration, 0.5 * dt);
+    b.velocity.addScaledVector(newAccel[i], 0.5 * dt);
+    b.acceleration = newAccel[i];
+  }
+}
+
+// everything besides raw integration: aging, black-hole tidal effects,
+// disintegration, slingshot/escape detection, trails, rotation. Runs after
+// integrateBodiesVerlet has already moved this frame's positions.
+function postStepBody(obj, dt) {
   if (obj._destroyed) return;
-  const accel = computeAcceleration(obj.mesh.position, obj, bodies);
-  obj.velocity.addScaledVector(accel, dt);
-  obj.mesh.position.addScaledVector(obj.velocity, dt);
   obj.age += dt * AGE_YEARS_PER_SIMSECOND;
 
   if (obj.type === 'blackhole') { updateTrail(obj.trail, obj.mesh.position); return; }
@@ -1380,7 +1466,7 @@ function stepBody(obj, dt) {
   }
 
   updateTrail(obj.trail, pos);
-  obj.core.rotation.y += dt * 0.3;
+  obj.core.rotation.y += dt * obj.rotationSpeed;
 }
 
 /* =========================================================================
@@ -1491,6 +1577,42 @@ function positionSelectionVisuals(pos, vel, ringScale, hs) {
 }
 
 /* =========================================================================
+   PHYSICS DEBUG HUD
+   ========================================================================= */
+function updateDebugHud() {
+  const $ = (id) => document.getElementById(id);
+  $('dbg-fps').textContent = Math.round(fpsSmoothed);
+  $('dbg-phys-ms').textContent = lastPhysicsMs.toFixed(2) + ' ms';
+  $('dbg-objects').textContent = bodies.length;
+  $('dbg-asteroids').textContent = aPos.length;
+  $('dbg-gravcalcs').textContent = gravityCalcCount.toLocaleString();
+  $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
+  $('dbg-substeps').textContent = lastSubsteps;
+
+  let vel = null, acc = null, mass = null, pos = null;
+  if (selected && selected.isAsteroid && aAlive[selected.index]) {
+    vel = aVel[selected.index]; acc = null; mass = aMass[selected.index]; pos = aPos[selected.index];
+  } else if (selected && selected.mesh) {
+    vel = selected.velocity; acc = selected.acceleration; mass = selected.mass; pos = selected.mesh.position;
+  }
+  if (vel && pos) {
+    $('dbg-sel-vel').textContent = `${vel.length().toFixed(3)} u/s`;
+    $('dbg-sel-acc').textContent = acc ? `${acc.length().toFixed(4)} u/s\u00b2` : '\u2014';
+    $('dbg-sel-ke').textContent = (0.5 * mass * vel.lengthSq()).toFixed(2);
+    const dom = findDominantAttractor(pos, selected.isAsteroid ? null : selected);
+    if (dom) {
+      const r = Math.max(pos.distanceTo(dom.mesh.position), 1);
+      $('dbg-sel-pe').textContent = (-(CONFIG.G * dom.mass * mass) / r).toFixed(2);
+    } else $('dbg-sel-pe').textContent = '\u2014';
+  } else {
+    $('dbg-sel-vel').textContent = '\u2014';
+    $('dbg-sel-acc').textContent = '\u2014';
+    $('dbg-sel-ke').textContent = '\u2014';
+    $('dbg-sel-pe').textContent = '\u2014';
+  }
+}
+
+/* =========================================================================
    OBJECT BROWSER — a searchable-by-eye list of every body in the sim
    ========================================================================= */
 let browserCollapsed = true;
@@ -1574,6 +1696,18 @@ document.getElementById('btn-return').addEventListener('click', () => {
 document.getElementById('btn-help').addEventListener('click', () => document.getElementById('help-modal').classList.remove('hidden'));
 document.getElementById('btn-help-close').addEventListener('click', () => document.getElementById('help-modal').classList.add('hidden'));
 
+document.getElementById('btn-gravity-toggle').addEventListener('click', () => {
+  CONFIG.gravityEnabled = !CONFIG.gravityEnabled;
+  const btn = document.getElementById('btn-gravity-toggle');
+  btn.textContent = CONFIG.gravityEnabled ? '\u25cf GRAVITY: ON' : '\u25cb GRAVITY: OFF';
+  btn.classList.toggle('off', !CONFIG.gravityEnabled);
+  logEvent(`Gravity simulation ${CONFIG.gravityEnabled ? 'enabled' : 'disabled'}.`, 'info');
+});
+document.getElementById('btn-debug').addEventListener('click', () => {
+  CONFIG.debugMode = !CONFIG.debugMode;
+  document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
+});
+
 /* =========================================================================
    POSTPROCESSING (bloom + gravitational lensing)
    ========================================================================= */
@@ -1615,7 +1749,7 @@ for (let i = 0; i < 3; i++) createComet();
   const offset = new THREE.Vector3(parent.radius * 5, 0, 0);
   const moonPos = parent.mesh.position.clone().add(offset);
   const moonVel = orbitalVelocity(moonPos, parent.mesh.position, parent.mass, 1).add(parent.velocity);
-  createMoon({ position: moonPos, velocity: moonVel, name: 'LUNA-01' });
+  createMoon({ position: moonPos, velocity: moonVel, name: 'LUNA-01', parent });
 }
 logEvent('Observatory systems online. Gravitational field stabilized.', 'info');
 
@@ -1670,7 +1804,7 @@ function generateUniverse() {
         .applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
       const moonPos = parent.mesh.position.clone().add(offset);
       const moonVel = orbitalVelocity(moonPos, parent.mesh.position, parent.mass, 0.9 + Math.random() * 0.3).add(parent.velocity);
-      createMoon({ position: moonPos, velocity: moonVel });
+      createMoon({ position: moonPos, velocity: moonVel, parent });
     }
   }
 
@@ -1815,9 +1949,11 @@ document.getElementById('btn-export').addEventListener('click', () => {
    ========================================================================= */
 const clock = new THREE.Clock();
 let perfAccum = 0, perfSamples = 0, perfScaled = false;
+let lastPhysicsMs = 0, lastSubsteps = 1, fpsSmoothed = 60;
 function animate() {
   requestAnimationFrame(animate);
   const rawDt = Math.min(clock.getDelta(), 0.05);
+  fpsSmoothed = fpsSmoothed * 0.92 + (rawDt > 0 ? 1 / rawDt : fpsSmoothed) * 0.08;
 
   // automatic performance scaling: if the framerate stays low for a
   // sustained stretch, quietly thin out the most expensive layer (the
@@ -1848,6 +1984,8 @@ function animate() {
     controls.update();
   }
 
+  gravityCalcCount = 0;
+  const physicsStart = performance.now();
   if (!CONFIG.paused) {
     const dt = rawDt * CONFIG.timeScale;
     simTime += dt;
@@ -1856,9 +1994,11 @@ function animate() {
     // split large steps (high time-scale) into bounded sub-steps so nothing
     // tunnels through a capture radius or blows up numerically
     const nBody = Math.min(Math.max(Math.ceil(dt / MAX_SUBSTEP_BODY), 1), MAX_SUBSTEPS_BODY);
+    lastSubsteps = nBody;
     const subDtBody = dt / nBody;
     for (let s = 0; s < nBody; s++) {
-      for (const obj of [...bodies]) stepBody(obj, subDtBody);
+      integrateBodiesVerlet(subDtBody);
+      for (const obj of [...bodies]) postStepBody(obj, subDtBody);
       updateBlackHoleInteractions(subDtBody);
     }
 
@@ -1876,6 +2016,7 @@ function animate() {
     }
     diskLight.intensity = 5 + Math.sin(simTime * 0.6) * 1.2 + (dominantBlackHole()?._burst || 0) * 4;
   }
+  lastPhysicsMs = performance.now() - physicsStart;
 
   const dominantForLight = dominantBlackHole();
   if (dominantForLight) diskLight.position.copy(dominantForLight.mesh.position);
@@ -1912,6 +2053,8 @@ function animate() {
     lensPass.uniforms.uStrength.value = CONFIG.lensStrength * (ndc.z < 1 ? 1 : 0);
   }
   lensPass.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
+
+  if (CONFIG.debugMode) updateDebugHud();
 
   composer.render();
 }

@@ -31,11 +31,31 @@
       <span id="sim-years-value" class="clock-value-small">0 YEARS</span>
     </div>
     <div class="topbar-actions">
+      <button id="btn-debug" class="ghost-btn" title="Physics Debug HUD">&#9881;</button>
       <button id="btn-help" class="ghost-btn" title="Help">?</button>
     </div>
   </header>
 
   <div id="breadcrumb-bar">UNIVERSE</div>
+
+  <!-- PHYSICS DEBUG HUD -->
+  <div id="debug-hud" class="panel hidden">
+    <div class="panel-head"><span>PHYSICS DEBUG</span><span class="corner"></span></div>
+    <div class="debug-body">
+      <div class="debug-row"><span>FPS</span><b id="dbg-fps">-</b></div>
+      <div class="debug-row"><span>PHYSICS TIME</span><b id="dbg-phys-ms">-</b></div>
+      <div class="debug-row"><span>OBJECTS</span><b id="dbg-objects">-</b></div>
+      <div class="debug-row"><span>ASTEROIDS</span><b id="dbg-asteroids">-</b></div>
+      <div class="debug-row"><span>GRAVITY CALCS/F</span><b id="dbg-gravcalcs">-</b></div>
+      <div class="debug-row"><span>SIM SPEED</span><b id="dbg-speed">-</b></div>
+      <div class="debug-row"><span>SUB-STEPS</span><b id="dbg-substeps">-</b></div>
+      <div class="debug-row divider"><span>SELECTED OBJECT</span></div>
+      <div class="debug-row"><span>VELOCITY</span><b id="dbg-sel-vel">-</b></div>
+      <div class="debug-row"><span>ACCELERATION</span><b id="dbg-sel-acc">-</b></div>
+      <div class="debug-row"><span>KINETIC ENERGY</span><b id="dbg-sel-ke">-</b></div>
+      <div class="debug-row"><span>POTENTIAL ENERGY</span><b id="dbg-sel-pe">-</b></div>
+    </div>
+  </div>
 
   <!-- LEFT: CONTROL DECK -->
   <aside id="control-deck" class="panel">
@@ -68,6 +88,7 @@
         <span>G CONSTANT</span><span class="val" id="val-g">0.60</span>
         <input type="range" id="slider-g" min="0.05" max="2" step="0.01" value="0.6">
       </label>
+      <button id="btn-gravity-toggle" class="wide-btn active-toggle">&#9679; GRAVITY: ON</button>
     </div>
 
     <div class="panel-section">
