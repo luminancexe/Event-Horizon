@@ -54,6 +54,13 @@
       <div class="debug-row"><span>ACCELERATION</span><b id="dbg-sel-acc">-</b></div>
       <div class="debug-row"><span>KINETIC ENERGY</span><b id="dbg-sel-ke">-</b></div>
       <div class="debug-row"><span>POTENTIAL ENERGY</span><b id="dbg-sel-pe">-</b></div>
+      <div class="debug-row divider"><span>VISUAL OVERLAYS</span></div>
+      <label class="debug-check"><input type="checkbox" id="ov-velocity"> Velocity vectors</label>
+      <label class="debug-check"><input type="checkbox" id="ov-force"> Force vectors</label>
+      <label class="debug-check"><input type="checkbox" id="ov-accel"> Acceleration vectors</label>
+      <label class="debug-check"><input type="checkbox" id="ov-paths" checked> Orbital paths</label>
+      <label class="debug-check"><input type="checkbox" id="ov-com"> Center of mass</label>
+      <label class="debug-check"><input type="checkbox" id="ov-collision"> Collision radii</label>
     </div>
   </div>
 
@@ -214,6 +221,7 @@
         <p>Select a star and choose <b>Enter Star System</b> to smoothly fly in and frame its planets and moons. Use <b>Follow</b> / <b>Auto-Orbit</b> to keep the camera locked on any selected object, or <b>Black Hole View</b> to fly back out. The bar under the header shows your current position in the hierarchy.</p>
         <p>Objects that stray too close to a black hole fragment, spiral in, and briefly flare the accretion disk as they're consumed.</p>
         <p>Two planets, moons, stars, or comets that touch will either <b>merge</b> (a slow, gentle encounter) or <b>shatter into debris</b> (a fast, violent one) — try steering one into another with the drag-launch tool.</p>
+        <p>The <span>&#9881;</span> icon opens a <b>Physics Debug HUD</b> with live FPS/timing stats and toggleable overlays: velocity, force, and acceleration vectors on every body, the system's center of mass, and each object's collision radius.</p>
         <p>Time runs from <b>0.1x</b> to <b>1000x</b> — speed it up to watch stars age: they swell into red giants (or supergiants), then quietly fade to a white dwarf, or for massive stars, go supernova and collapse into a neutron star or a brand new black hole.</p>
         <p>Two black holes that drift close will orbit each other, slowly decay, and eventually merge into one larger black hole — with a rippling gravitational-wave shockwave through the whole scene.</p>
         <p><b>Generate New Universe</b> builds a fresh, randomized system from scratch. <b>Save</b> / <b>Load</b> keep a snapshot in this browser; <b>Export</b> downloads it as a .json file you can keep or share.</p>

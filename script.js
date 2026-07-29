@@ -18,6 +18,12 @@ const CONFIG = {
   lensStrength: 1.0,
   gravityEnabled: true,      // can be switched off for performance A/B testing
   debugMode: false,
+  overlayVelocity: false,
+  overlayForce: false,
+  overlayAccel: false,
+  overlayPaths: true,
+  overlayCOM: false,
+  overlayCollision: false,
 };
 
 const BASE_HORIZON   = 9;      // visual radius of a "reference mass" black hole
@@ -403,6 +409,12 @@ const influenceSphere = new THREE.Mesh(
 influenceSphere.visible = false;
 scene.add(influenceSphere);
 
+const comMarkerTex = makeRingTexture('rgba(180,255,150,0.95)');
+const comMarker = new THREE.Sprite(new THREE.SpriteMaterial({ map: comMarkerTex, color: 0xb4ff96, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+comMarker.scale.set(10, 10, 1);
+comMarker.visible = false;
+scene.add(comMarker);
+
 /* =========================================================================
    OBJECT ARCHITECTURE — class hierarchy for every simulated body.
    The factory functions below build the Three.js visuals (mesh, glow,
@@ -672,12 +684,12 @@ function randomOrbitPosition(minR, maxR) {
    ASTEROID FIELD (instanced test-particles, pooled, feel every massive body)
    ========================================================================= */
 let asteroidMesh = null;
-let aPos = [], aVel = [], aMass = [], aRadius = [], aAlive = [];
+let aPos = [], aVel = [], aAcc = [], aMass = [], aRadius = [], aAlive = [];
 const dummy = new THREE.Object3D();
 
 function initAsteroids(count) {
   if (asteroidMesh) { scene.remove(asteroidMesh); asteroidMesh.geometry.dispose(); asteroidMesh.material.dispose(); }
-  aPos = []; aVel = []; aMass = []; aRadius = []; aAlive = [];
+  aPos = []; aVel = []; aAcc = []; aMass = []; aRadius = []; aAlive = [];
   const geo = new THREE.IcosahedronGeometry(1, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x8b8378, roughness: 0.95, metalness: 0.05 });
   asteroidMesh = new THREE.InstancedMesh(geo, mat, Math.max(count, 1));
@@ -688,6 +700,7 @@ function initAsteroids(count) {
 function spawnAsteroid(i, pos, vel, mass, size) {
   aPos[i] = pos || randomOrbitPosition(BASE_HORIZON * 4, 200);
   aVel[i] = vel || orbitalVelocity(aPos[i], new THREE.Vector3(), CONFIG.blackHoleMass, 0.75 + Math.random() * 0.5);
+  aAcc[i] = new THREE.Vector3();
   aMass[i] = mass ?? (0.05 + Math.random() * 1.5);
   aRadius[i] = size ?? (0.3 + Math.random() * 1.1);
   aAlive[i] = 1;
@@ -706,6 +719,11 @@ function updateAsteroids(dt) {
   const n = aPos.length;
   const grid = new Map();
   const cellSize = 8;
+  const live = [];
+
+  // pass 1: capture check (using last known position), then Verlet position
+  // update for everything that survives — same integration scheme used for
+  // the named bodies, so asteroids behave consistently under the same gravity
   for (let i = 0; i < n; i++) {
     if (!aAlive[i]) continue;
     const pos = aPos[i];
@@ -718,11 +736,24 @@ function updateAsteroids(dt) {
         asteroidCaptureFxCooldown = 1.5;
       }
       spawnAsteroid(i);
+      live.push(i);
       continue;
     }
+    pos.addScaledVector(aVel[i], dt);
+    pos.addScaledVector(aAcc[i], 0.5 * dt * dt);
+    live.push(i);
+  }
 
-    const accel = computeAcceleration(pos, null, bodies);
-    aVel[i].addScaledVector(accel, dt);
+  // pass 2: recompute acceleration at the new positions, then update velocity
+  // using the average of the old and new acceleration (Velocity Verlet)
+  for (const i of live) {
+    const pos = aPos[i];
+    const newAccel = computeAcceleration(pos, null, bodies);
+    aVel[i].addScaledVector(aAcc[i], 0.5 * dt);
+    aVel[i].addScaledVector(newAccel, 0.5 * dt);
+    aAcc[i] = newAccel;
+
+    const { bh, dist: r } = nearestBlackHole(pos);
     if (bh) {
       const radii = bhRadii(bh);
       if (r < radii.drag) {
@@ -730,10 +761,9 @@ function updateAsteroids(dt) {
         aVel[i].multiplyScalar(1 - k * 0.015 * dt * 60);
       }
     }
-    aPos[i].addScaledVector(aVel[i], dt);
-    if (pos.length() > ESCAPE_R) spawnAsteroid(i);
+    if (pos.length() > ESCAPE_R) { spawnAsteroid(i); continue; }
 
-    const key = `${Math.floor(aPos[i].x / cellSize)}_${Math.floor(aPos[i].z / cellSize)}`;
+    const key = `${Math.floor(pos.x / cellSize)}_${Math.floor(pos.z / cellSize)}`;
     if (!grid.has(key)) grid.set(key, []);
     grid.get(key).push(i);
   }
@@ -1280,6 +1310,10 @@ function destroyObject(obj, reason, silent = false) {
   scene.remove(obj.mesh);
   scene.remove(obj.trail.line);
   obj.trail.geo.dispose();
+  if (obj._velArrow) scene.remove(obj._velArrow);
+  if (obj._forceArrow) scene.remove(obj._forceArrow);
+  if (obj._accArrow) scene.remove(obj._accArrow);
+  if (obj._collisionSphere) { scene.remove(obj._collisionSphere); obj._collisionSphere.geometry.dispose(); obj._collisionSphere.material.dispose(); }
   unregisterSelectable(obj.core);
   bodies = bodies.filter((b) => b !== obj);
   if (selected === obj) deselect();
@@ -1702,6 +1736,100 @@ function updateDebugHud() {
 }
 
 /* =========================================================================
+   DEBUG VISUAL OVERLAYS — velocity/force/acceleration vectors, orbital
+   paths, center of mass, collision radii. Each helper is created lazily on
+   the body itself the first time it's needed, then just shown/hidden.
+   ========================================================================= */
+function ensureDebugHelpers(obj) {
+  if (!obj._velArrow) {
+    obj._velArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xffe066, 1.6, 0.9);
+    obj._velArrow.visible = false;
+    scene.add(obj._velArrow);
+  }
+  if (!obj._forceArrow) {
+    obj._forceArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xff5d5d, 1.6, 0.9);
+    obj._forceArrow.visible = false;
+    scene.add(obj._forceArrow);
+  }
+  if (!obj._accArrow) {
+    obj._accArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0x7fd9ff, 1.6, 0.9);
+    obj._accArrow.visible = false;
+    scene.add(obj._accArrow);
+  }
+  if (!obj._collisionSphere) {
+    obj._collisionSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 14, 10),
+      new THREE.MeshBasicMaterial({ color: 0xff9d4d, wireframe: true, transparent: true, opacity: 0.4, depthWrite: false })
+    );
+    obj._collisionSphere.visible = false;
+    scene.add(obj._collisionSphere);
+  }
+}
+function hideDebugHelpers(obj) {
+  if (obj._velArrow) obj._velArrow.visible = false;
+  if (obj._forceArrow) obj._forceArrow.visible = false;
+  if (obj._accArrow) obj._accArrow.visible = false;
+  if (obj._collisionSphere) obj._collisionSphere.visible = false;
+}
+
+function updateDebugOverlays() {
+  const active = CONFIG.debugMode;
+  const wantBodyOverlay = active && (CONFIG.overlayVelocity || CONFIG.overlayForce || CONFIG.overlayAccel || CONFIG.overlayCollision);
+
+  for (const b of bodies) {
+    if (!wantBodyOverlay) { hideDebugHelpers(b); continue; }
+    ensureDebugHelpers(b);
+    const pos = b.mesh.position;
+
+    if (CONFIG.overlayVelocity && b.velocity.length() > 0.05) {
+      b._velArrow.visible = true;
+      b._velArrow.position.copy(pos);
+      b._velArrow.setDirection(b.velocity.clone().normalize());
+      b._velArrow.setLength(Math.min(b.velocity.length() * 1.3 + 1, 70), 1.6, 0.8);
+    } else b._velArrow.visible = false;
+
+    const acc = b.acceleration || new THREE.Vector3();
+    const accLen = acc.length();
+    if (CONFIG.overlayAccel && accLen > 0.0005) {
+      b._accArrow.visible = true;
+      b._accArrow.position.copy(pos);
+      b._accArrow.setDirection(acc.clone().normalize());
+      b._accArrow.setLength(Math.min(accLen * 45 + 1, 70), 1.6, 0.8);
+    } else b._accArrow.visible = false;
+
+    if (CONFIG.overlayForce && accLen > 0.0005) {
+      const force = accLen * b.mass; // F = m*a
+      b._forceArrow.visible = true;
+      b._forceArrow.position.copy(pos);
+      b._forceArrow.setDirection(acc.clone().normalize()); // same direction as acceleration
+      b._forceArrow.setLength(THREE.MathUtils.clamp(Math.log10(force + 1) * 16, 2, 80), 1.6, 0.8);
+    } else b._forceArrow.visible = false;
+
+    if (CONFIG.overlayCollision && b.type !== 'blackhole') {
+      b._collisionSphere.visible = true;
+      b._collisionSphere.position.copy(pos);
+      b._collisionSphere.scale.setScalar(b.radius * 0.85);
+    } else b._collisionSphere.visible = false;
+  }
+
+  if (active && CONFIG.overlayCOM && bodies.length) {
+    let totalMass = 0;
+    const com = new THREE.Vector3();
+    for (const b of bodies) { com.addScaledVector(b.mesh.position, b.mass); totalMass += b.mass; }
+    if (totalMass > 0) com.divideScalar(totalMass);
+    comMarker.visible = true;
+    comMarker.position.copy(com);
+  } else {
+    comMarker.visible = false;
+  }
+
+  // orbital-path visibility: only overridden while actively debugging, so
+  // the default (always-on) trail behavior is untouched outside debug mode
+  const showPaths = !active || CONFIG.overlayPaths;
+  for (const b of bodies) if (b.trail) b.trail.line.visible = showPaths;
+}
+
+/* =========================================================================
    OBJECT BROWSER — a searchable-by-eye list of every body in the sim
    ========================================================================= */
 let browserCollapsed = true;
@@ -1796,6 +1924,15 @@ document.getElementById('btn-debug').addEventListener('click', () => {
   CONFIG.debugMode = !CONFIG.debugMode;
   document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
 });
+const OVERLAY_CHECKBOXES = {
+  'ov-velocity': 'overlayVelocity', 'ov-force': 'overlayForce', 'ov-accel': 'overlayAccel',
+  'ov-paths': 'overlayPaths', 'ov-com': 'overlayCOM', 'ov-collision': 'overlayCollision',
+};
+for (const [id, key] of Object.entries(OVERLAY_CHECKBOXES)) {
+  const el = document.getElementById(id);
+  el.checked = CONFIG[key];
+  el.addEventListener('change', () => { CONFIG[key] = el.checked; });
+}
 
 /* =========================================================================
    POSTPROCESSING (bloom + gravitational lensing)
@@ -2144,6 +2281,7 @@ function animate() {
   }
   lensPass.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
 
+  updateDebugOverlays();
   if (CONFIG.debugMode) updateDebugHud();
 
   composer.render();
