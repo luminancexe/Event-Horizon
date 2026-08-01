@@ -102,9 +102,9 @@ export function breadcrumbChainFor(obj) {
 }
 
 export function select(obj) {
-  if (state.selected && state.selected.trail) { state.selected.trail.boosted = false; state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity; }
+  if (state.selected && state.selected.trail) state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity;
   state.selected = obj;
-  if (obj.trail) { obj.trail.boosted = true; obj.trail.line.material.opacity = Math.min(0.9, obj.trail.baseOpacity * 2.2); }
+  if (obj.trail) obj.trail.line.material.opacity = Math.min(0.9, obj.trail.baseOpacity * 2.2);
   document.getElementById('info-panel').classList.remove('hidden');
   document.getElementById('btn-follow').disabled = false;
   document.getElementById('btn-orbit').disabled = false;
@@ -114,7 +114,7 @@ export function select(obj) {
   updateBreadcrumb(breadcrumbChainFor(obj));
 }
 export function selectAsteroid(instanceId) {
-  if (state.selected && state.selected.trail) { state.selected.trail.boosted = false; state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity; }
+  if (state.selected && state.selected.trail) state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity;
   state.selected = { type: 'asteroid', name: `AST-${instanceId}`, isAsteroid: true, index: instanceId };
   document.getElementById('info-panel').classList.remove('hidden');
   document.getElementById('btn-follow').disabled = true;
@@ -126,7 +126,7 @@ export function selectAsteroid(instanceId) {
   updateBreadcrumb(dom ? [...breadcrumbChainFor(dom), state.selected.name] : ['UNIVERSE', state.selected.name]);
 }
 export function deselect() {
-  if (state.selected && state.selected.trail) { state.selected.trail.boosted = false; state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity; }
+  if (state.selected && state.selected.trail) state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity;
   state.selected = null;
   document.getElementById('info-panel').classList.add('hidden');
   document.getElementById('btn-follow').disabled = true;

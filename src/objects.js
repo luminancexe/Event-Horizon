@@ -5,15 +5,12 @@ import { makeGlowTexture, makeRingTexture, starGlowTex } from './textures.js';
 import { registerSelectable } from './selection.js';
 
 /* =========================================================================
-   TRAIL SYSTEM — every moving body drags one of these behind it.
-   Length is driven by CONFIG.trailLength; changing it live-resizes every
-   existing trail's buffer (see resizeAllTrails) rather than only affecting
-   trails created after the change.
+   TRAIL SYSTEM — every moving body drags one of these behind it
    ========================================================================= */
+const TRAIL_LEN = 140;
 export function createTrail(color, opacity = 0.35, additive = false) {
-  const maxLen = CONFIG.trailLength;
   const geo = new THREE.BufferGeometry();
-  const positions = new Float32Array(maxLen * 3);
+  const positions = new Float32Array(TRAIL_LEN * 3);
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setDrawRange(0, 0);
   const mat = new THREE.LineBasicMaterial({
@@ -22,57 +19,18 @@ export function createTrail(color, opacity = 0.35, additive = false) {
   });
   const line = new THREE.Line(geo, mat);
   scene.add(line);
-  return { line, points: [], geo, baseOpacity: opacity, maxLen };
+  return { line, points: [], geo, baseOpacity: opacity };
 }
-// speed (world-units/sec, optional) makes faster objects leave longer,
-// more visible trails — a slow/stationary body's trail fades short and dim,
-// a fast one streaks further behind it and stays brighter.
-export function updateTrail(trail, pos, speed = null) {
+export function updateTrail(trail, pos) {
   trail.points.push(pos.clone());
-  if (trail.points.length > trail.maxLen) trail.points.shift();
-
-  let visibleCount = trail.points.length;
-  const boost = trail.boosted ? 2.2 : 1;
-  if (speed !== null && CONFIG.trailsEnabled) {
-    const speedFrac = THREE.MathUtils.clamp(speed / 12, 0, 1); // ~12 u/s treated as "fast"
-    trail.line.material.opacity = Math.min(0.9, trail.baseOpacity * THREE.MathUtils.lerp(0.5, 1.6, speedFrac) * boost);
-    visibleCount = Math.min(trail.points.length, Math.max(6, Math.round(trail.points.length * THREE.MathUtils.lerp(0.35, 1, speedFrac))));
-  } else {
-    trail.line.material.opacity = Math.min(0.9, trail.baseOpacity * boost);
-  }
-
+  if (trail.points.length > TRAIL_LEN) trail.points.shift();
   const arr = trail.geo.attributes.position.array;
-  const start = trail.points.length - visibleCount;
-  for (let i = 0; i < visibleCount; i++) {
-    const p = trail.points[start + i];
-    arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z;
+  for (let i = 0; i < trail.points.length; i++) {
+    arr[i * 3] = trail.points[i].x; arr[i * 3 + 1] = trail.points[i].y; arr[i * 3 + 2] = trail.points[i].z;
   }
   trail.geo.attributes.position.needsUpdate = true;
-  trail.geo.setDrawRange(0, visibleCount);
+  trail.geo.setDrawRange(0, trail.points.length);
   trail.geo.computeBoundingSphere();
-}
-
-// resize one trail's GPU buffer in place, keeping as much of its recent
-// history as fits in the new size
-function resizeTrailBuffer(trail, newLen) {
-  const keep = trail.points.slice(-newLen);
-  trail.points = keep;
-  trail.maxLen = newLen;
-  const positions = new Float32Array(newLen * 3);
-  for (let i = 0; i < keep.length; i++) {
-    positions[i * 3] = keep[i].x; positions[i * 3 + 1] = keep[i].y; positions[i * 3 + 2] = keep[i].z;
-  }
-  trail.geo.dispose();
-  trail.geo = new THREE.BufferGeometry();
-  trail.geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  trail.geo.setDrawRange(0, keep.length);
-  trail.line.geometry = trail.geo;
-}
-// called when the user drags the trail-length slider: updates the shared
-// setting and resizes every trail currently in the scene to match
-export function resizeAllTrails(newLen) {
-  CONFIG.trailLength = newLen;
-  for (const b of state.bodies) if (b.trail) resizeTrailBuffer(b.trail, newLen);
 }
 
 /* =========================================================================

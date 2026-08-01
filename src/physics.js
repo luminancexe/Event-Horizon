@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CONFIG, state, SOFTENING, ESCAPE_R, AGE_YEARS_PER_SIMSECOND, COLLISION_MERGE_SPEED, COLLISION_GRACE_MS } from './state.js';
+import { CONFIG, state, SOFTENING, ESCAPE_R, AGE_YEARS_PER_SIMSECOND, MAX_SUBSTEP_BODY, COLLISION_MERGE_SPEED, COLLISION_GRACE_MS } from './state.js';
 import { updateTrail, nearestBlackHole, bhRadii, blackHoles, createBlackHole, createStar, createPlanet, createMoon, createComet, createNeutronStar } from './objects.js';
 import { disintegrate, destroyObject, spawnEnergyRing, particleBurst } from './effects.js';
 import { cameraShake } from './camera.js';
@@ -57,7 +57,7 @@ export function postStepBody(obj, dt) {
   if (obj._destroyed) return;
   obj.age += dt * AGE_YEARS_PER_SIMSECOND;
 
-  if (obj.type === 'blackhole') { updateTrail(obj.trail, obj.mesh.position, obj.velocity.length()); return; }
+  if (obj.type === 'blackhole') { updateTrail(obj.trail, obj.mesh.position); return; }
 
   const pos = obj.mesh.position;
   const { bh, dist: r } = nearestBlackHole(pos);
@@ -118,7 +118,7 @@ export function postStepBody(obj, dt) {
     return;
   }
 
-  updateTrail(obj.trail, pos, obj.velocity.length());
+  updateTrail(obj.trail, pos);
   obj.core.rotation.y += dt * obj.rotationSpeed;
 }
 
@@ -143,7 +143,7 @@ export function updateBlackHoleInteractions(dt) {
         // pair gets a gentle artificial drag that shrinks their mutual orbit
         // over time until they finally spiral together
         const k = (decayR - d) / decayR;
-        const drag = 1 - k * 0.01 * Math.min(dt, CONFIG.maxSubstep) * 60;
+        const drag = 1 - k * 0.01 * Math.min(dt, MAX_SUBSTEP_BODY) * 60;
         a.velocity.multiplyScalar(drag);
         b.velocity.multiplyScalar(drag);
       }

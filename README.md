@@ -27,7 +27,7 @@ blackhole/
     ├── creation.js      context menu + click-drag object placement
     ├── events.js        the event log / timeline + toast banners
     ├── ui.js            debug HUD, overlays, object browser, control-deck wiring
-    └── saveload.js       generate/save/load/export a universe
+    └── saveload.js      generate/save/load/export a universe
 ```
 
 `index.html` loads `src/main.js` as a module; everything else is pulled in via `import`. Because `localStorage` is scoped per-origin, Save/Load is most reliable when served from a local server (`python3 -m http.server`, VS Code's Live Server, etc.) rather than opened directly as a `file://` URL — Export-to-file works either way.
@@ -49,13 +49,10 @@ blackhole/
 **Control Deck** (left panel):
 - **Time**: pause, or run from 0.1x to 1000x; a `SIMULATION TIME` readout tracks elapsed in-universe years
 - **Gravity**: black hole mass, the gravitational constant `G`, and a gravity on/off toggle for A/B testing
-- **Physics**: a timestep/sub-step-size slider — controls integration accuracy independently of simulation speed (smaller = more accurate and stable at high time-scales, more CPU cost)
-- **Field**: asteroid count, disk brightness, lensing strength, a trails on/off toggle, and a trail-length slider (live-resizes every existing trail, not just new ones)
+- **Field**: asteroid count, accretion disk brightness, gravitational lensing strength
 - **Camera**: Follow / Auto-Orbit toggle for the selected object, and a Black Hole View button with a smooth flight instead of a snap-cut
 - **Create**: opens the same spawn menu as right-click
 - **Universe**: Generate New Universe (fully random system), Save / Load (browser storage), Export (.json download)
-
-Hovering any less-obvious control shows a short tooltip explaining what it does.
 
 **Right panel**: a collapsible **Object Browser** (click any body to select + fly to it), the selected object's live telemetry, and the **Event Log** — a clickable timeline where anything marked with `↗` jumps the camera to where it happened.
 
@@ -76,7 +73,6 @@ A `⚙` icon in the top bar opens the **Physics Debug HUD**: FPS, physics-step t
 - **Accretion disk** — a custom GLSL shader renders turbulent, differentially-rotating (faster near the center) plasma, and reactively brightens/pulses whenever something is consumed.
 - **Gravitational lensing** — a post-processing pass warps the background starfield around each black hole's screen position.
 - **Automatic performance scaling** — if the frame rate stays low for a sustained stretch, the asteroid field is quietly thinned once (and only once) rather than left to keep bogging down.
-- **Velocity-scaled trails** — every trail's brightness and visible length track the object's current speed, so a fast slingshot streaks while a slow drift barely leaves a mark; independently toggleable and length-adjustable from the FIELD section.
 
 This is a *stylized*, not scientifically rigorous, simulation — some effects (star lifespans compressed to be watchable, "c" velocity readouts, the artificial inspiral drag near a black hole) are dramatized for pacing and visual clarity rather than strict general relativity.
 
@@ -90,10 +86,7 @@ Shared config and tunable constants live in `src/state.js`:
 export const CONFIG = {
   G: 0.6, blackHoleMass: 5000, timeScale: 1,
   asteroidCount: 400, diskBrightness: 1.0, lensStrength: 1.0,
-  gravityEnabled: true, debugMode: false,
-  trailsEnabled: true, trailLength: 140,   // trail visibility + point history length
-  maxSubstep: 0.12,                        // physics timestep/tick-rate, independent of timeScale
-  ...
+  gravityEnabled: true, debugMode: false, ...
 };
 
 export const BASE_HORIZON = 9;        // visual size of a reference-mass black hole
@@ -102,10 +95,8 @@ export const TIDAL_MULT   = 4.2;      // → tidal-stress radius
 export const DRAG_MULT    = 7.5;      // → orbital-decay radius
 export const ESCAPE_R     = 480;
 export const COLLISION_MERGE_SPEED = 12;  // below this relative speed, colliding bodies merge; above, they shatter
-export const MAX_SUBSTEPS_BODY = 40;      // hard ceiling on sub-steps per frame, regardless of maxSubstep
+export const MAX_SUBSTEP_BODY = 0.12;     // integration stability at high time-scale
 ```
-
-Every field on `CONFIG` is saved and restored by Save/Load automatically (it's serialized as a whole object, not a hand-picked subset) — the same is true of camera mode/position/target and whichever object was selected, so reloading a save puts you back exactly where you left off, not just the physics state.
 
 Visual styling (colors, fonts, HUD layout) lives in `style.css`.
 
