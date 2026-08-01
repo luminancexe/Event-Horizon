@@ -28,6 +28,9 @@ export const CONFIG = {
   overlayPaths: true,
   overlayCOM: false,
   overlayCollision: false,
+  trailsEnabled: true,       // master trail visibility, independent of debug mode
+  trailLength: 140,          // points kept per trail; changing this live-resizes existing trails
+  maxSubstep: 0.12,          // physics timestep/tick-rate: smaller = finer integration, more CPU
 };
 
 export const BASE_HORIZON   = 9;      // visual radius of a "reference mass" black hole
@@ -44,8 +47,9 @@ export const STAR_LIFESPAN_K = 60000; // heavier stars burn through this much fa
 // at high time-scales a single frame can represent many sim-seconds; integrating
 // the whole thing in one Euler step would let fast-moving bodies tunnel through
 // capture radii or blow up numerically, so we always split big steps into
-// bounded sub-steps instead.
-export const MAX_SUBSTEP_BODY      = 0.12;
+// bounded sub-steps instead. The sub-step *size* is user-tunable (CONFIG.maxSubstep,
+// clamped in the UI); these two counts are hard safety ceilings on how many
+// sub-steps a single frame can ever spend, regardless of that setting.
 export const MAX_SUBSTEPS_BODY     = 40;
 export const MAX_SUBSTEPS_ASTEROID = 8;
 
