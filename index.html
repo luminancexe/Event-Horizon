@@ -87,30 +87,43 @@
 
     <div class="panel-section">
       <div class="section-title">GRAVITY</div>
-      <label class="slider-row">
+      <label class="slider-row" title="Total mass of the primary black hole — larger mass means stronger, longer-range pull.">
         <span>BLACK HOLE MASS</span><span class="val" id="val-mass">5000</span>
         <input type="range" id="slider-mass" min="500" max="20000" step="100" value="5000">
       </label>
-      <label class="slider-row">
+      <label class="slider-row" title="The gravitational constant used by every force calculation in the sim — scales all gravity uniformly.">
         <span>G CONSTANT</span><span class="val" id="val-g">0.60</span>
         <input type="range" id="slider-g" min="0.05" max="2" step="0.01" value="0.6">
       </label>
-      <button id="btn-gravity-toggle" class="wide-btn active-toggle">&#9679; GRAVITY: ON</button>
+      <button id="btn-gravity-toggle" class="wide-btn active-toggle" title="Turn gravity off entirely — useful for isolating rendering performance from physics cost.">&#9679; GRAVITY: ON</button>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">PHYSICS</div>
+      <label class="slider-row" title="How finely each simulated frame is subdivided for integration. Smaller = more accurate and stable at high time-scales, but more CPU cost. Independent of simulation speed.">
+        <span>TIMESTEP (SUB-STEP SIZE)</span><span class="val" id="val-substep">0.12</span>
+        <input type="range" id="slider-substep" min="0.02" max="0.3" step="0.01" value="0.12">
+      </label>
     </div>
 
     <div class="panel-section">
       <div class="section-title">FIELD</div>
-      <label class="slider-row">
+      <label class="slider-row" title="Number of asteroids in the debris field — the main lever for scene performance.">
         <span>ASTEROID COUNT</span><span class="val" id="val-asteroids">400</span>
-        <input type="range" id="slider-asteroids" min="0" max="1200" step="50" value="400">
+        <input type="range" id="slider-asteroids" min="0" max="2000" step="50" value="400">
       </label>
-      <label class="slider-row">
+      <label class="slider-row" title="Overall glow/turbulence intensity of every black hole's accretion disk.">
         <span>DISK BRIGHTNESS</span><span class="val" id="val-disk">1.00</span>
         <input type="range" id="slider-disk" min="0.2" max="2.5" step="0.05" value="1">
       </label>
-      <label class="slider-row">
+      <label class="slider-row" title="How strongly the background starfield bends around a black hole on screen.">
         <span>LENSING STRENGTH</span><span class="val" id="val-lens">1.00</span>
         <input type="range" id="slider-lens" min="0" max="2" step="0.05" value="1">
+      </label>
+      <button id="btn-trails-toggle" class="wide-btn active-toggle" title="Show or hide every object's motion trail (independent of the Debug HUD's own path overlay).">&#9679; TRAILS: ON</button>
+      <label class="slider-row" title="How many points of history each trail keeps. Longer trails cost a little more to update.">
+        <span>TRAIL LENGTH</span><span class="val" id="val-traillen">140</span>
+        <input type="range" id="slider-traillen" min="20" max="400" step="10" value="140">
       </label>
     </div>
 
@@ -226,6 +239,7 @@
         <p>Two black holes that drift close will orbit each other, slowly decay, and eventually merge into one larger black hole — with a rippling gravitational-wave shockwave through the whole scene.</p>
         <p><b>Generate New Universe</b> builds a fresh, randomized system from scratch. <b>Save</b> / <b>Load</b> keep a snapshot in this browser; <b>Export</b> downloads it as a .json file you can keep or share.</p>
         <p>The <b>Object Browser</b> (top of the right panel) lists everything currently in the sim — click any entry to select it and fly there. Log entries marked with <b>↗</b> are clickable too, jumping you straight to where that event happened.</p>
+        <p>Trails now stretch and brighten with an object's speed — toggle them or change their length in the FIELD section. The new PHYSICS section's timestep slider controls integration accuracy independent of simulation speed (smaller = more stable at high time-scales, more CPU cost). Save/Load now restores the camera, selection, and every debug/UI toggle exactly as you left them, not just the physics.</p>
       </div>
       <button id="btn-help-close" class="wide-btn accent">UNDERSTOOD</button>
     </div>

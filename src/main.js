@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CONFIG, state, AGE_YEARS_PER_SIMSECOND, MAX_SUBSTEP_BODY, MAX_SUBSTEPS_BODY, MAX_SUBSTEPS_ASTEROID } from './state.js';
+import { CONFIG, state, AGE_YEARS_PER_SIMSECOND, MAX_SUBSTEPS_BODY, MAX_SUBSTEPS_ASTEROID } from './state.js';
 import { camera, controls, diskLight, composer, lensPass } from './scene.js';
 import { updateCamera } from './camera.js';
 import { createBlackHole, createStar, createPlanet, createMoon, createComet, orbitalVelocity, blackHoles, dominantBlackHole } from './objects.js';
@@ -19,6 +19,7 @@ import './saveload.js';
    INITIAL POPULATION
    ========================================================================= */
 createBlackHole({ position: new THREE.Vector3(), velocity: new THREE.Vector3(), mass: CONFIG.blackHoleMass, name: 'SAGITTARIUS PRIME' });
+initAsteroids(CONFIG.asteroidCount);
 for (let i = 0; i < 5; i++) createStar();
 const initialPlanets = [];
 for (let i = 0; i < 8; i++) initialPlanets.push(createPlanet());
@@ -73,7 +74,7 @@ function animate() {
 
     // split large steps (high time-scale) into bounded sub-steps so nothing
     // tunnels through a capture radius or blows up numerically
-    const nBody = Math.min(Math.max(Math.ceil(dt / MAX_SUBSTEP_BODY), 1), MAX_SUBSTEPS_BODY);
+    const nBody = Math.min(Math.max(Math.ceil(dt / CONFIG.maxSubstep), 1), MAX_SUBSTEPS_BODY);
     state.lastSubsteps = nBody;
     const subDtBody = dt / nBody;
     for (let s = 0; s < nBody; s++) {
