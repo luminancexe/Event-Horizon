@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { CONFIG, state } from './state.js';
 import { camera, controls } from './scene.js';
 import { setCameraMode } from './camera.js';
-import { deselect, updateBreadcrumb } from './selection.js';
+import { deselect, select, selectAsteroid, updateBreadcrumb } from './selection.js';
 import { createBlackHole, createStar, createPlanet, createMoon, createComet, createNeutronStar, orbitalVelocity } from './objects.js';
 import { initAsteroids } from './asteroids.js';
 import { destroyObject, clearFragments } from './effects.js';
 import { logEvent, showBanner } from './events.js';
-import { refreshObjectBrowser } from './ui.js';
+import { refreshObjectBrowser, syncUIFromConfig } from './ui.js';
 
 /* =========================================================================
    UNIVERSE MANAGEMENT — clear / procedurally generate / save / load / export
@@ -79,10 +79,18 @@ function generateUniverse() {
 }
 
 function serializeUniverse() {
+  let selectedMarker = null;
+  if (state.selected?.isAsteroid) selectedMarker = { kind: 'asteroid', index: state.selected.index };
+  else if (state.selected) selectedMarker = { kind: 'body' }; // which body gets tagged below via __wasSelected
+
   return {
-    version: 1,
-    config: { G: CONFIG.G, blackHoleMass: CONFIG.blackHoleMass, diskBrightness: CONFIG.diskBrightness, lensStrength: CONFIG.lensStrength, asteroidCount: CONFIG.asteroidCount },
+    version: 2,
+    config: { ...CONFIG },
     simTime: state.simTime, simYears: state.simYears,
+    cameraMode: state.cameraMode,
+    cameraPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+    cameraTarget: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+    selected: selectedMarker,
     bodies: state.bodies.map((b) => ({
       type: b.type, name: b.name, mass: b.mass, radius: b.radius,
       position: { x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z },
@@ -91,6 +99,7 @@ function serializeUniverse() {
       stage: b.stage, lifecycleScale: b.lifecycleScale,
       color: b.core?.material?.color ? b.core.material.color.getHex() : undefined,
       glowColor: b.glow?.material?.color ? b.glow.material.color.getHex() : undefined,
+      __wasSelected: b === state.selected || undefined,
     })),
     asteroids: { pos: state.aPos.map((p) => [p.x, p.y, p.z]), vel: state.aVel.map((v) => [v.x, v.y, v.z]), mass: state.aMass.slice(), radius: state.aRadius.slice() },
   };
@@ -107,7 +116,7 @@ function restoreBody(bd) {
   else if (bd.type === 'moon') obj = createMoon(opts);
   else if (bd.type === 'comet') obj = createComet(opts);
   else if (bd.type === 'neutron') obj = createNeutronStar(opts);
-  if (!obj) return;
+  if (!obj) return null;
   obj.age = bd.age ?? 0;
   if (bd.type === 'star') {
     obj.stage = bd.stage || 'main_sequence';
@@ -118,26 +127,24 @@ function restoreBody(bd) {
   }
   if (bd.color !== undefined && obj.core?.material?.color) obj.core.material.color.setHex(bd.color);
   if (bd.glowColor !== undefined && obj.glow?.material?.color) obj.glow.material.color.setHex(bd.glowColor);
+  return obj;
 }
 
 function deserializeUniverse(data) {
   clearUniverse();
   if (data.config) {
     Object.assign(CONFIG, data.config);
-    document.getElementById('slider-mass').value = CONFIG.blackHoleMass;
-    document.getElementById('val-mass').textContent = CONFIG.blackHoleMass;
-    document.getElementById('slider-g').value = CONFIG.G;
-    document.getElementById('val-g').textContent = CONFIG.G.toFixed(2);
-    document.getElementById('slider-disk').value = CONFIG.diskBrightness;
-    document.getElementById('val-disk').textContent = CONFIG.diskBrightness.toFixed(2);
-    document.getElementById('slider-lens').value = CONFIG.lensStrength;
-    document.getElementById('val-lens').textContent = CONFIG.lensStrength.toFixed(2);
+    syncUIFromConfig();
   }
   state.simTime = data.simTime || 0;
   state.simYears = data.simYears || 0;
 
   const sorted = [...(data.bodies || [])].sort((a, b) => (a.type === 'blackhole' ? -1 : 0) - (b.type === 'blackhole' ? -1 : 0));
-  for (const bd of sorted) restoreBody(bd);
+  let restoredSelection = null;
+  for (const bd of sorted) {
+    const obj = restoreBody(bd);
+    if (obj && bd.__wasSelected) restoredSelection = obj;
+  }
 
   if (data.asteroids?.pos?.length) {
     const count = data.asteroids.pos.length;
@@ -153,6 +160,22 @@ function deserializeUniverse(data) {
     document.getElementById('val-asteroids').textContent = count;
   } else {
     initAsteroids(CONFIG.asteroidCount || 400);
+  }
+
+  // restore camera framing and mode
+  if (data.cameraPosition) camera.position.set(data.cameraPosition.x, data.cameraPosition.y, data.cameraPosition.z);
+  if (data.cameraTarget) controls.target.set(data.cameraTarget.x, data.cameraTarget.y, data.cameraTarget.z);
+
+  // restore selection: a named body (matched via the __wasSelected flag baked
+  // into its save entry, since ids aren't stable across a reload) or an asteroid
+  if (restoredSelection) {
+    select(restoredSelection);
+  } else if (data.selected?.kind === 'asteroid' && state.aAlive[data.selected.index]) {
+    selectAsteroid(data.selected.index);
+  }
+  if (data.cameraMode && data.cameraMode !== 'free') {
+    setCameraMode(data.cameraMode);
+    if (restoredSelection) state.followTarget = restoredSelection;
   }
 
   logEvent('Universe loaded from saved data.', 'info');

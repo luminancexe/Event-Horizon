@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONFIG, state } from './state.js';
 import { scene } from './scene.js';
 import { makeRingTexture } from './textures.js';
-import { findDominantAttractor, blackHoles, dominantBlackHole } from './objects.js';
+import { findDominantAttractor, blackHoles, dominantBlackHole, resizeAllTrails } from './objects.js';
 import { initAsteroids } from './asteroids.js';
 import { select, updateBreadcrumb } from './selection.js';
 import { flyCameraTo, setCameraMode } from './camera.js';
@@ -141,7 +141,7 @@ export function updateDebugOverlays() {
 
   // orbital-path visibility: only overridden while actively debugging, so
   // the default (always-on) trail behavior is untouched outside debug mode
-  const showPaths = !active || CONFIG.overlayPaths;
+  const showPaths = CONFIG.trailsEnabled && (!active || CONFIG.overlayPaths);
   for (const b of state.bodies) if (b.trail) b.trail.line.visible = showPaths;
 }
 
@@ -207,6 +207,15 @@ bindSlider('slider-disk', (v) => {
   document.getElementById('val-disk').textContent = v.toFixed(2);
 });
 bindSlider('slider-lens', (v) => { CONFIG.lensStrength = v; document.getElementById('val-lens').textContent = v.toFixed(2); });
+bindSlider('slider-substep', (v) => { CONFIG.maxSubstep = v; document.getElementById('val-substep').textContent = v.toFixed(2); });
+bindSlider('slider-traillen', (v) => { document.getElementById('val-traillen').textContent = v; resizeAllTrails(Math.round(v)); });
+
+document.getElementById('btn-trails-toggle').addEventListener('click', () => {
+  CONFIG.trailsEnabled = !CONFIG.trailsEnabled;
+  const btn = document.getElementById('btn-trails-toggle');
+  btn.textContent = CONFIG.trailsEnabled ? '\u25cf TRAILS: ON' : '\u25cb TRAILS: OFF';
+  btn.classList.toggle('off', !CONFIG.trailsEnabled);
+});
 
 document.getElementById('btn-follow').addEventListener('click', () => {
   if (!state.selected || state.selected.isAsteroid) return;
@@ -247,4 +256,35 @@ for (const [id, key] of Object.entries(OVERLAY_CHECKBOXES)) {
   const el = document.getElementById(id);
   el.checked = CONFIG[key];
   el.addEventListener('change', () => { CONFIG[key] = el.checked; });
+}
+
+/* =========================================================================
+   CONFIG -> UI SYNC — applies every CONFIG value to its on-screen control.
+   Used after loading a saved universe (or generating a new one) so sliders,
+   toggles, and the debug HUD all reflect exactly what was restored, rather
+   than silently drifting out of sync with the underlying CONFIG object.
+   ========================================================================= */
+export function syncUIFromConfig() {
+  const setSlider = (id, valId, v, digits) => {
+    document.getElementById(id).value = v;
+    document.getElementById(valId).textContent = digits === 0 ? v : v.toFixed(digits);
+  };
+  setSlider('slider-mass', 'val-mass', CONFIG.blackHoleMass, 0);
+  setSlider('slider-g', 'val-g', CONFIG.G, 2);
+  setSlider('slider-asteroids', 'val-asteroids', CONFIG.asteroidCount, 0);
+  setSlider('slider-disk', 'val-disk', CONFIG.diskBrightness, 2);
+  setSlider('slider-lens', 'val-lens', CONFIG.lensStrength, 2);
+  setSlider('slider-substep', 'val-substep', CONFIG.maxSubstep, 2);
+  setSlider('slider-traillen', 'val-traillen', CONFIG.trailLength, 0);
+
+  const gravBtn = document.getElementById('btn-gravity-toggle');
+  gravBtn.textContent = CONFIG.gravityEnabled ? '\u25cf GRAVITY: ON' : '\u25cb GRAVITY: OFF';
+  gravBtn.classList.toggle('off', !CONFIG.gravityEnabled);
+
+  const trailBtn = document.getElementById('btn-trails-toggle');
+  trailBtn.textContent = CONFIG.trailsEnabled ? '\u25cf TRAILS: ON' : '\u25cb TRAILS: OFF';
+  trailBtn.classList.toggle('off', !CONFIG.trailsEnabled);
+
+  document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
+  for (const [id, key] of Object.entries(OVERLAY_CHECKBOXES)) document.getElementById(id).checked = CONFIG[key];
 }
