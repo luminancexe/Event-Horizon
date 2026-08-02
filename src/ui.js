@@ -16,8 +16,12 @@ export function updateDebugHud() {
   const selected = state.selected;
   $('dbg-fps').textContent = Math.round(state.fpsSmoothed);
   $('dbg-phys-ms').textContent = state.lastPhysicsMs.toFixed(2) + ' ms';
+  $('dbg-ms-gravity').textContent = state.lastGravityMs.toFixed(2) + ' ms';
+  $('dbg-ms-collision').textContent = state.lastCollisionMs.toFixed(2) + ' ms';
+  $('dbg-ms-asteroids').textContent = state.lastAsteroidMs.toFixed(2) + ' ms';
   $('dbg-objects').textContent = state.bodies.length;
   $('dbg-asteroids').textContent = state.aPos.length;
+  $('dbg-fragments').textContent = state.fragments.length;
   $('dbg-gravcalcs').textContent = state.gravityCalcCount.toLocaleString();
   $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
   $('dbg-substeps').textContent = state.lastSubsteps;

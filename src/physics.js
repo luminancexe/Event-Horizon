@@ -9,8 +9,8 @@ import { spawnAsteroid } from './asteroids.js';
 /* =========================================================================
    N-BODY GRAVITY
    ========================================================================= */
-export function computeAcceleration(pos, excludeObj, sources) {
-  const accel = new THREE.Vector3();
+export function computeAcceleration(pos, excludeObj, sources, out) {
+  const accel = out ? out.set(0, 0, 0) : new THREE.Vector3();
   if (!CONFIG.gravityEnabled) return accel;
   for (const s of sources) {
     if (s === excludeObj) continue;
@@ -41,12 +41,16 @@ export function integrateBodiesVerlet(dt) {
     b.mesh.position.addScaledVector(b.velocity, dt);
     b.mesh.position.addScaledVector(b.acceleration, 0.5 * dt * dt);
   }
-  const newAccel = list.map((b) => computeAcceleration(b.mesh.position, b, state.bodies));
-  for (let i = 0; i < list.length; i++) {
-    const b = list[i];
+  for (const b of list) computeAcceleration(b.mesh.position, b, state.bodies, b._newAcceleration);
+  for (const b of list) {
     b.velocity.addScaledVector(b.acceleration, 0.5 * dt);
-    b.velocity.addScaledVector(newAccel[i], 0.5 * dt);
-    b.acceleration = newAccel[i];
+    b.velocity.addScaledVector(b._newAcceleration, 0.5 * dt);
+    // swap references instead of copying — b.acceleration now holds the value
+    // that was just computed, and next sub-step's "new" value will overwrite
+    // what is now the old (no allocation either way)
+    const tmp = b.acceleration;
+    b.acceleration = b._newAcceleration;
+    b._newAcceleration = tmp;
   }
 }
 

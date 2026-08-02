@@ -13,7 +13,7 @@ const dummy = new THREE.Object3D();
 
 export function initAsteroids(count) {
   if (state.asteroidMesh) { scene.remove(state.asteroidMesh); state.asteroidMesh.geometry.dispose(); state.asteroidMesh.material.dispose(); }
-  state.aPos = []; state.aVel = []; state.aAcc = []; state.aMass = []; state.aRadius = []; state.aAlive = [];
+  state.aPos = []; state.aVel = []; state.aAcc = []; state.aNewAcc = []; state.aMass = []; state.aRadius = []; state.aAlive = [];
   const geo = new THREE.IcosahedronGeometry(1, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x8b8378, roughness: 0.95, metalness: 0.05 });
   state.asteroidMesh = new THREE.InstancedMesh(geo, mat, Math.max(count, 1));
@@ -25,6 +25,7 @@ export function spawnAsteroid(i, pos, vel, mass, size) {
   state.aPos[i] = pos || randomOrbitPosition(BASE_HORIZON * 4, 200);
   state.aVel[i] = vel || orbitalVelocity(state.aPos[i], new THREE.Vector3(), CONFIG.blackHoleMass, 0.75 + Math.random() * 0.5);
   state.aAcc[i] = new THREE.Vector3();
+  state.aNewAcc[i] = new THREE.Vector3();
   state.aMass[i] = mass ?? (0.05 + Math.random() * 1.5);
   state.aRadius[i] = size ?? (0.3 + Math.random() * 1.1);
   state.aAlive[i] = 1;
@@ -34,13 +35,19 @@ export function spawnAsteroid(i, pos, vel, mass, size) {
   dummy.updateMatrix();
   state.asteroidMesh.setMatrixAt(i, dummy.matrix);
 }
-initAsteroids(CONFIG.asteroidCount);
+// NOTE: initAsteroids() is intentionally NOT auto-invoked here at module
+// top level. asteroids.js sits inside a circular import chain (objects.js
+// -> selection.js -> effects.js -> asteroids.js -> objects.js), and calling
+// into objects.js's exports (randomOrbitPosition/orbitalVelocity) before
+// objects.js has finished its own evaluation throws a ReferenceError that
+// silently aborts the entire module graph. main.js (which is never part of
+// a cycle) calls initAsteroids() explicitly once everything is loaded.
 
 let collisionLogCooldown = 0;
 let asteroidCaptureFxCooldown = 0;
 export function updateAsteroids(dt) {
   asteroidCaptureFxCooldown -= dt;
-  const { aPos, aVel, aAcc, aRadius, aAlive, asteroidMesh } = state;
+  const { aPos, aVel, aAcc, aNewAcc, aRadius, aAlive, asteroidMesh } = state;
   const n = aPos.length;
   const grid = new Map();
   const cellSize = 8;
@@ -73,10 +80,13 @@ export function updateAsteroids(dt) {
   // using the average of the old and new acceleration (Velocity Verlet)
   for (const i of live) {
     const pos = aPos[i];
-    const newAccel = computeAcceleration(pos, null, state.bodies);
+    computeAcceleration(pos, null, state.bodies, aNewAcc[i]);
     aVel[i].addScaledVector(aAcc[i], 0.5 * dt);
-    aVel[i].addScaledVector(newAccel, 0.5 * dt);
-    aAcc[i] = newAccel;
+    aVel[i].addScaledVector(aNewAcc[i], 0.5 * dt);
+    // swap references instead of allocating a fresh vector — with up to
+    // thousands of asteroids this was the single biggest per-frame
+    // allocation source in the whole app
+    const tmp = aAcc[i]; aAcc[i] = aNewAcc[i]; aNewAcc[i] = tmp;
 
     const { bh, dist: r } = nearestBlackHole(pos);
     if (bh) {

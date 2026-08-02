@@ -22,30 +22,38 @@ export function createTrail(color, opacity = 0.35, additive = false) {
   });
   const line = new THREE.Line(geo, mat);
   scene.add(line);
-  return { line, points: [], geo, baseOpacity: opacity, maxLen };
+  // circular buffer of pre-allocated points: avoids a clone + array
+  // push/shift on every single update (this runs every physics sub-step,
+  // for every body — by far the hottest code path trails touch)
+  const points = new Array(maxLen);
+  for (let i = 0; i < maxLen; i++) points[i] = new THREE.Vector3();
+  return { line, points, head: 0, count: 0, maxLen, geo, baseOpacity: opacity };
 }
 // speed (world-units/sec, optional) makes faster objects leave longer,
 // more visible trails — a slow/stationary body's trail fades short and dim,
 // a fast one streaks further behind it and stays brighter.
 export function updateTrail(trail, pos, speed = null) {
-  trail.points.push(pos.clone());
-  if (trail.points.length > trail.maxLen) trail.points.shift();
+  trail.points[trail.head].copy(pos);
+  trail.head = (trail.head + 1) % trail.maxLen;
+  if (trail.count < trail.maxLen) trail.count++;
 
-  let visibleCount = trail.points.length;
+  let visibleCount = trail.count;
   const boost = trail.boosted ? 2.2 : 1;
   if (speed !== null && CONFIG.trailsEnabled) {
     const speedFrac = THREE.MathUtils.clamp(speed / 12, 0, 1); // ~12 u/s treated as "fast"
     trail.line.material.opacity = Math.min(0.9, trail.baseOpacity * THREE.MathUtils.lerp(0.5, 1.6, speedFrac) * boost);
-    visibleCount = Math.min(trail.points.length, Math.max(6, Math.round(trail.points.length * THREE.MathUtils.lerp(0.35, 1, speedFrac))));
+    visibleCount = Math.min(trail.count, Math.max(6, Math.round(trail.count * THREE.MathUtils.lerp(0.35, 1, speedFrac))));
   } else {
     trail.line.material.opacity = Math.min(0.9, trail.baseOpacity * boost);
   }
 
   const arr = trail.geo.attributes.position.array;
-  const start = trail.points.length - visibleCount;
-  for (let i = 0; i < visibleCount; i++) {
-    const p = trail.points[start + i];
-    arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z;
+  for (let k = 0; k < visibleCount; k++) {
+    // k=0 is the oldest visible point, k=visibleCount-1 is the newest
+    const offsetFromNewest = visibleCount - 1 - k;
+    const idx = (trail.head - 1 - offsetFromNewest + trail.maxLen * 2) % trail.maxLen;
+    const p = trail.points[idx];
+    arr[k * 3] = p.x; arr[k * 3 + 1] = p.y; arr[k * 3 + 2] = p.z;
   }
   trail.geo.attributes.position.needsUpdate = true;
   trail.geo.setDrawRange(0, visibleCount);
@@ -55,17 +63,25 @@ export function updateTrail(trail, pos, speed = null) {
 // resize one trail's GPU buffer in place, keeping as much of its recent
 // history as fits in the new size
 function resizeTrailBuffer(trail, newLen) {
-  const keep = trail.points.slice(-newLen);
-  trail.points = keep;
-  trail.maxLen = newLen;
-  const positions = new Float32Array(newLen * 3);
-  for (let i = 0; i < keep.length; i++) {
-    positions[i * 3] = keep[i].x; positions[i * 3 + 1] = keep[i].y; positions[i * 3 + 2] = keep[i].z;
+  const keepCount = Math.min(trail.count, newLen);
+  const kept = [];
+  for (let k = 0; k < keepCount; k++) {
+    const offsetFromNewest = keepCount - 1 - k;
+    const idx = (trail.head - 1 - offsetFromNewest + trail.maxLen * 2) % trail.maxLen;
+    kept.push(trail.points[idx].clone());
   }
+  const points = new Array(newLen);
+  for (let i = 0; i < newLen; i++) points[i] = i < kept.length ? kept[i] : new THREE.Vector3();
+  trail.points = points;
+  trail.head = kept.length % newLen;
+  trail.count = kept.length;
+  trail.maxLen = newLen;
+
+  const positions = new Float32Array(newLen * 3);
   trail.geo.dispose();
   trail.geo = new THREE.BufferGeometry();
   trail.geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  trail.geo.setDrawRange(0, keep.length);
+  trail.geo.setDrawRange(0, 0);
   trail.line.geometry = trail.geo;
 }
 // called when the user drags the trail-length slider: updates the shared
@@ -172,6 +188,7 @@ export class CelestialBody {
     this.core = opts.core;         // the raycastable/selectable mesh
     this.velocity = opts.velocity ? opts.velocity.clone() : new THREE.Vector3();
     this.acceleration = new THREE.Vector3(); // persisted for Velocity Verlet integration
+    this._newAcceleration = new THREE.Vector3(); // scratch buffer swapped with .acceleration each sub-step (avoids reallocating)
     this.rotationSpeed = opts.rotationSpeed ?? 0.3;
     this.temperature = opts.temperature ?? null;
     this.trail = opts.trail ?? null;

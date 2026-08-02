@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG, state, AGE_YEARS_PER_SIMSECOND, MAX_SUBSTEPS_BODY, MAX_SUBSTEPS_ASTEROID } from './state.js';
-import { camera, controls, diskLight, composer, lensPass } from './scene.js';
+import { camera, controls, diskLight, composer, lensPass, renderer } from './scene.js';
 import { updateCamera } from './camera.js';
 import { createBlackHole, createStar, createPlanet, createMoon, createComet, orbitalVelocity, blackHoles, dominantBlackHole } from './objects.js';
 import { initAsteroids, updateAsteroids } from './asteroids.js';
@@ -38,16 +38,17 @@ logEvent('Observatory systems online. Gravitational field stabilized.', 'info');
    MAIN LOOP
    ========================================================================= */
 const clock = new THREE.Clock();
-let perfAccum = 0, perfSamples = 0, perfScaled = false;
+let perfAccum = 0, perfSamples = 0, perfScaled = false, perfScaledTier2 = false;
 
 function animate() {
   requestAnimationFrame(animate);
   const rawDt = Math.min(clock.getDelta(), 0.05);
   state.fpsSmoothed = state.fpsSmoothed * 0.92 + (rawDt > 0 ? 1 / rawDt : state.fpsSmoothed) * 0.08;
 
-  // automatic performance scaling: if the framerate stays low for a
-  // sustained stretch, quietly thin out the most expensive layer (the
-  // asteroid field) once, rather than letting the whole sim bog down
+  // automatic performance scaling: two escalating, one-shot tiers. Neither
+  // re-triggers once applied (no oscillation) — if the sim is still heavy
+  // after thinning the asteroid field, only then does it fall back to
+  // reducing render resolution, which is a bigger visual trade-off.
   perfAccum += rawDt; perfSamples++;
   if (perfSamples >= 90) {
     const avgDt = perfAccum / perfSamples;
@@ -59,6 +60,11 @@ function animate() {
       document.getElementById('slider-asteroids').value = newCount;
       document.getElementById('val-asteroids').textContent = newCount;
       logEvent('Performance mode engaged — asteroid density reduced automatically for a smoother framerate.', 'info');
+    } else if (perfScaled && !perfScaledTier2 && avgDt > 0.033 && renderer.getPixelRatio() > 1) {
+      perfScaledTier2 = true;
+      renderer.setPixelRatio(1);
+      composer.setSize(window.innerWidth, window.innerHeight);
+      logEvent('Performance mode (tier 2) — render resolution reduced for a smoother framerate.', 'info');
     }
     perfAccum = 0; perfSamples = 0;
   }
@@ -67,6 +73,7 @@ function animate() {
 
   state.gravityCalcCount = 0;
   const physicsStart = performance.now();
+  let gravityMs = 0, collisionMs = 0, asteroidMs = 0;
   if (!CONFIG.paused) {
     const dt = rawDt * CONFIG.timeScale;
     state.simTime += dt;
@@ -78,15 +85,24 @@ function animate() {
     state.lastSubsteps = nBody;
     const subDtBody = dt / nBody;
     for (let s = 0; s < nBody; s++) {
+      let t0 = performance.now();
       integrateBodiesVerlet(subDtBody);
       for (const obj of [...state.bodies]) postStepBody(obj, subDtBody);
+      gravityMs += performance.now() - t0;
+
+      t0 = performance.now();
       updateBlackHoleInteractions(subDtBody);
       checkBodyCollisions();
+      collisionMs += performance.now() - t0;
     }
 
     const nAst = Math.min(nBody, MAX_SUBSTEPS_ASTEROID);
     const subDtAst = dt / nAst;
-    for (let s = 0; s < nAst; s++) { updateAsteroids(subDtAst); updateFragments(subDtAst); }
+    for (let s = 0; s < nAst; s++) {
+      const t0 = performance.now();
+      updateAsteroids(subDtAst); updateFragments(subDtAst);
+      asteroidMs += performance.now() - t0;
+    }
 
     for (const b of [...state.bodies]) if (b.type === 'star') updateStarLifecycle(b);
     for (const b of state.bodies) if (b.type === 'neutron') { const pulse = 1 + 0.3 * Math.sin(state.simTime * 8 + b.id); b.core.scale.setScalar(pulse); }
@@ -99,6 +115,9 @@ function animate() {
     diskLight.intensity = 5 + Math.sin(state.simTime * 0.6) * 1.2 + (dominantBlackHole()?._burst || 0) * 4;
   }
   state.lastPhysicsMs = performance.now() - physicsStart;
+  state.lastGravityMs = gravityMs;
+  state.lastCollisionMs = collisionMs;
+  state.lastAsteroidMs = asteroidMs;
 
   const dominantForLight = dominantBlackHole();
   if (dominantForLight) diskLight.position.copy(dominantForLight.mesh.position);

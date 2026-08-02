@@ -70,7 +70,7 @@ export const state = {
 
   // asteroid field (parallel arrays + the instanced mesh that renders them)
   asteroidMesh: null,
-  aPos: [], aVel: [], aAcc: [], aMass: [], aRadius: [], aAlive: [],
+  aPos: [], aVel: [], aAcc: [], aNewAcc: [], aMass: [], aRadius: [], aAlive: [],
 
   // debris that spirals into a black hole after a tidal disintegration
   fragments: [],
@@ -89,6 +89,9 @@ export const state = {
 
   // debug HUD stats (written by physics.js / main.js, read by ui.js)
   lastPhysicsMs: 0,
+  lastGravityMs: 0,
+  lastCollisionMs: 0,
+  lastAsteroidMs: 0,
   lastSubsteps: 1,
   fpsSmoothed: 60,
 };

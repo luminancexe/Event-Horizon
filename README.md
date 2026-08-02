@@ -13,7 +13,8 @@ The project is a set of ES modules — keep the folder structure intact:
 ```
 blackhole/
 ├── index.html
-├── style.css
+├── css/
+│   └── style.css
 └── src/
     ├── main.js          entry point: initial population + the animation loop
     ├── state.js         CONFIG + all shared mutable state
@@ -122,5 +123,7 @@ A few modules import from each other in both directions (e.g. `selection.js` nee
 ## Performance notes
 
 - Asteroids render as a single `InstancedMesh` with a spatial grid for collision checks and Velocity Verlet integration at no extra cost over the old scheme (same number of gravity calculations per asteroid per sub-step).
-- If things feel sluggish, lower **Asteroid Count** first — it's the biggest lever, and the sim will also do this automatically after a few seconds of sustained low frame rate.
+- Gravity integration reuses a persistent scratch acceleration vector per body/asteroid (swapped, not reallocated, each sub-step), and trails use a true circular buffer instead of clone+push+shift — together these eliminate what were the two largest per-frame allocation sources in the app, particularly with a large asteroid field at high time-scale.
+- If things feel sluggish, lower **Asteroid Count** first — it's the biggest lever. Automatic scaling now has two escalating tiers: after a few seconds of sustained low frame rate it first thins the asteroid field once, and if that alone isn't enough, it then drops render resolution to 1x pixel ratio. Neither re-triggers once applied.
+- The Debug HUD (⚙) breaks physics time down into gravity/integration, collisions, and asteroid-field phases, plus fragment/particle counts, if you want to see where time is actually going.
 - Bloom and lensing are full-screen post-process passes (`src/scene.js`); on lower-end GPUs, reduce `diskBrightness`/`lensStrength` or the `UnrealBloomPass` strength there to lighten the load.
