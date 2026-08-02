@@ -28,7 +28,7 @@ blackhole/
     ├── creation.js      context menu + click-drag object placement
     ├── events.js        the event log / timeline + toast banners
     ├── ui.js            debug HUD, overlays, object browser, control-deck wiring
-    └── saveload.js       generate/save/load/export a universe
+    └── saveload.js      generate/save/load/export a universe
 ```
 
 `index.html` loads `src/main.js` as a module; everything else is pulled in via `import`. Because `localStorage` is scoped per-origin, Save/Load is most reliable when served from a local server (`python3 -m http.server`, VS Code's Live Server, etc.) rather than opened directly as a `file://` URL — Export-to-file works either way.
