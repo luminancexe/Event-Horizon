@@ -108,7 +108,7 @@ export function disintegrate(obj, bh) {
   logEvent(`${obj.name} has been consumed by the black hole.`, 'critical', obj.mesh.position);
   showBanner(obj.type === 'planet' ? 'PLANETARY BODY DESTROYED' : obj.type === 'star' ? 'TIDAL DISRUPTION COMPLETE' : `${obj.name} CONSUMED`);
 
-  destroyObject(obj, 'captured', true); // true: skip the generic burst/log, we already did a bespoke one above
+  destroyObject(obj); // main object is gone; the fragments/effects above already told the story
 }
 
 /* =========================================================================
@@ -184,7 +184,7 @@ function triggerSupernova(obj) {
     logEvent(`${obj.name} has collapsed into a neutron star.`, 'info', obj.mesh.position);
   }
 
-  destroyObject(obj, 'supernova', true);
+  destroyObject(obj);
 }
 
 /* =========================================================================
@@ -217,7 +217,11 @@ export function particleBurst(position, opts = {}) {
 }
 export function burstAtDisk(position) { particleBurst(position); }
 
-export function destroyObject(obj, reason, silent = false) {
+// removes a body from the simulation and the scene. Every destruction path
+// (disintegration, supernova, merger, collision, escape) fires its own
+// specific log/banner/particle effect *before* calling this — this function
+// only ever does the generic teardown.
+export function destroyObject(obj) {
   obj._destroyed = true;
   scene.remove(obj.mesh);
   scene.remove(obj.trail.line);
@@ -229,11 +233,4 @@ export function destroyObject(obj, reason, silent = false) {
   unregisterSelectable(obj.core);
   state.bodies = state.bodies.filter((b) => b !== obj);
   if (state.selected === obj) deselect();
-  if (!silent) {
-    burstAtDisk(obj.mesh.position);
-    if (reason === 'captured') {
-      logEvent(`${obj.name} has been consumed by the black hole.`, 'critical');
-      showBanner(obj.type === 'planet' ? 'PLANETARY BODY DESTROYED' : 'TIDAL DISRUPTION COMPLETE');
-    }
-  }
 }

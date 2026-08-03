@@ -13,7 +13,7 @@ import { refreshObjectBrowser, syncUIFromConfig } from './ui.js';
    UNIVERSE MANAGEMENT — clear / procedurally generate / save / load / export
    ========================================================================= */
 function clearUniverse() {
-  for (const b of [...state.bodies]) destroyObject(b, 'reset', true);
+  for (const b of [...state.bodies]) destroyObject(b);
   clearFragments();
   initAsteroids(0);
   deselect();
@@ -130,10 +130,29 @@ function restoreBody(bd) {
   return obj;
 }
 
+// guards against a corrupted or hand-edited save file putting the sim in a
+// broken/unstable state — mirrors the min/max already enforced by each
+// control's slider in index.html
+const CONFIG_BOUNDS = {
+  G: [0.05, 2], blackHoleMass: [500, 20000], asteroidCount: [0, 2000],
+  diskBrightness: [0.2, 2.5], lensStrength: [0, 2],
+  trailLength: [20, 400], maxSubstep: [0.02, 0.3], timeScale: [0.1, 1000],
+};
+function clampConfigToSafeRanges() {
+  for (const [key, [min, max]] of Object.entries(CONFIG_BOUNDS)) {
+    if (typeof CONFIG[key] === 'number' && isFinite(CONFIG[key])) {
+      CONFIG[key] = Math.min(max, Math.max(min, CONFIG[key]));
+    } else if (key in CONFIG) {
+      CONFIG[key] = min; // non-numeric/NaN garbage in the save file — fall back to a safe floor
+    }
+  }
+}
+
 function deserializeUniverse(data) {
   clearUniverse();
   if (data.config) {
     Object.assign(CONFIG, data.config);
+    clampConfigToSafeRanges();
     syncUIFromConfig();
   }
   state.simTime = data.simTime || 0;
