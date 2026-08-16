@@ -11,7 +11,7 @@ No build step, no install. Open `index.html` in a modern desktop or mobile brows
 The project is a set of ES modules — keep the folder structure intact:
 
 ```
-blackhole/
+Event Horizon/
 ├── index.html
 ├── css/
 │   └── style.css
