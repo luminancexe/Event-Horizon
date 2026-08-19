@@ -888,12 +888,20 @@ export class BlackHole extends CelestialBody {
     return Math.max(BASE_HORIZON * Math.cbrt(this.mass / BASE_BH_MASS), 1.6);
   }
 
+  set visualRadius(v) {
+    this._visualRadius = v;
+  }
+
   /**
    * Alias for visualRadius.
    * @returns {number}
    */
   get radius() {
     return this.visualRadius;
+  }
+
+  set radius(v) {
+    this._visualRadius = v;
   }
 
   /**
