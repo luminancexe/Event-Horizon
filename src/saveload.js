@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three';
-import { CONFIG, state, BH_MASS_CLASSES } from './state.js';
+import { CONFIG, state, BH_MASS_CLASSES, AGE_YEARS_PER_SIMSECOND } from './state.js';
 import { camera, controls } from './scene.js';
 import { setCameraMode } from './camera.js';
 import { deselect, select, selectAsteroid, updateBreadcrumb } from './selection.js';
@@ -182,6 +182,7 @@ export function serializeUniverse() {
         : undefined,
       tempK: b.tempK,
       age: b.age,
+      properTime: b.properTime,
       lifespan: b.lifespan,
       isHighMass: b.isHighMass,
       stage: b.stage,
@@ -238,6 +239,7 @@ function restoreBody(bd) {
   if (!obj) return null;
 
   obj.age = bd.age ?? 0;
+  obj.properTime = bd.properTime ?? (bd.age ? bd.age / AGE_YEARS_PER_SIMSECOND : 0);
   if (bd.type === 'star') {
     obj.stage = bd.stage || 'main_sequence';
     obj.lifecycleScale = bd.lifecycleScale ?? 1;

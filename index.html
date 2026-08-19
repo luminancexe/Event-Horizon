@@ -59,6 +59,7 @@
       <div class="debug-row"><span>VELOCITY</span><b id="dbg-sel-vel">-</b></div>
       <div class="debug-row"><span>ACCELERATION</span><b id="dbg-sel-acc">-</b></div>
       <div class="debug-row"><span>FRAME DRAG ACC</span><b id="dbg-sel-framedrag">-</b></div>
+      <div class="debug-row"><span>TIME DILATION</span><b id="dbg-sel-dilation">-</b></div>
       <div class="debug-row"><span>KINETIC ENERGY</span><b id="dbg-sel-ke">-</b></div>
       <div class="debug-row"><span>POTENTIAL ENERGY</span><b id="dbg-sel-pe">-</b></div>
       <div class="debug-row divider"><span>VISUAL OVERLAYS</span></div>
@@ -90,6 +91,7 @@
         <button data-speed="100" class="tbtn">100x</button>
         <button data-speed="1000" class="tbtn">1000x</button>
       </div>
+      <div class="clock-display" id="sim-clock">T+ 00:00:00</div>
       <button id="btn-reset" class="wide-btn">&#8635; RESET SIMULATION</button>
     </div>
 
@@ -113,6 +115,7 @@
         <input type="range" id="slider-substep" min="0.02" max="0.3" step="0.01" value="0.12">
       </label>
       <button id="btn-framedrag-toggle" class="wide-btn active-toggle" title="Toggle Kerr-inspired Lense-Thirring frame-dragging acceleration around rotating black holes.">&#9679; FRAME DRAGGING: ON</button>
+      <button id="btn-timedilation-toggle" class="wide-btn active-toggle" title="Toggle Kerr/Schwarzschild gravitational and kinematic time dilation for local object clocks.">&#9679; TIME DILATION: ON</button>
     </div>
 
     <div class="panel-section">

@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { CONFIG, state, C_SIM, BH_MASS_CLASSES } from './state.js';
 import { scene, camera } from './scene.js';
 import { selectionRingTex } from './textures.js';
-import { findDominantAttractor, nearestBlackHole, bhRadii } from './objects.js';
+import { findDominantAttractor, nearestBlackHole, bhRadii, computeTimeDilation } from './objects.js';
 import { flyCameraTo, setCameraMode } from './camera.js';
 import { logEvent, showBanner } from './events.js';
 import { destroyObject } from './effects.js';
@@ -357,8 +357,8 @@ export function updateInfoPanel() {
       : bh.bhClass === 'supermassive' ? 'GALACTIC CORE' : 'LOCAL SYSTEM';
     $('info-status').textContent =
       bh.rotationModel === 'kerr'
-        ? (CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED')
-        : 'STATIC (SCHWARZSCHILD)';
+        ? (CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE | HORIZON: 0.000×' : 'FRAME DRAG: PAUSED | HORIZON: 0.000×')
+        : 'STATIC | HORIZON: 0.000×';
     positionSelectionVisuals(bh.mesh.position, bh.velocity, bh.visualRadius * 2.6, null);
     return;
   }
@@ -371,6 +371,7 @@ export function updateInfoPanel() {
     }
     const r = state.aPos[i].length();
     const dom = findDominantAttractor(state.aPos[i], null);
+    const dilation = computeTimeDilation(state.aPos[i], state.aVel[i], null);
     $('info-name').textContent = selected.name;
     $('info-type').textContent = 'ASTEROID';
     $('info-parent').textContent = dom ? dom.name : '—';
@@ -381,11 +382,11 @@ export function updateInfoPanel() {
     const tidal = bh ? r < bhRadii(bh).tidal : false;
     $('info-orbit').textContent = tidal ? 'UNSTABLE' : 'STABLE';
     $('info-temp').textContent = '—';
-    $('info-age').textContent = '—';
+    $('info-age').textContent = dilation < 0.999 ? `RATE: ${(dilation * 100).toFixed(1)}%` : 'RATE: 100%';
     $('info-lifecycle').textContent = '—';
     $('info-tidal').textContent = tidal ? 'ELEVATED' : 'NOMINAL';
     $('info-influence').textContent = '—';
-    $('info-status').textContent = 'TRACKED';
+    $('info-status').textContent = dilation < 0.999 ? `DILATED (${dilation.toFixed(3)}×)` : 'TRACKED';
     positionSelectionVisuals(state.aPos[i], state.aVel[i], state.aRadius[i] * 3.5, null);
     return;
   }
@@ -394,6 +395,14 @@ export function updateInfoPanel() {
   const r = obj.mesh.position.length();
   const speed = obj.velocity.length();
   const dom = findDominantAttractor(obj.mesh.position, obj);
+  const dilation = obj.timeDilation !== undefined
+    ? obj.timeDilation
+    : computeTimeDilation(obj.mesh.position, obj.velocity, obj);
+  const ratePct = (dilation * 100).toFixed(1);
+  const rateStr = dilation < 0.999
+    ? `${ratePct}% (${dilation.toFixed(3)}×)`
+    : '100.0% (1.000× NOMINAL)';
+
   $('info-name').textContent = obj.name;
   $('info-type').textContent = obj.type.toUpperCase();
   $('info-parent').textContent = dom ? dom.name : '—';
@@ -409,7 +418,7 @@ export function updateInfoPanel() {
       : obj.type === 'neutron'
       ? '~1,000,000,000 K'
       : '—';
-  $('info-age').textContent = Math.floor(obj.age).toLocaleString() + ' yrs';
+  $('info-age').textContent = `${Math.floor(obj.age).toLocaleString()} yrs | Rate: ${rateStr}`;
 
   if (obj.type === 'star') {
     const pct = Math.min(100, (obj.age / obj.lifespan) * 100).toFixed(0);
@@ -428,7 +437,9 @@ export function updateInfoPanel() {
   $('info-tidal').textContent = (obj.tidalPercent ?? 0).toFixed(1) + '%';
   const hs = hillRadius(obj);
   $('info-influence').textContent = hs ? (hs.hr / 10).toFixed(2) + ' AU' : '—';
-  $('info-status').textContent = obj.status === 'unstable' ? 'DESTABILIZING' : 'NOMINAL';
+  $('info-status').textContent = dilation < 0.999
+    ? `DILATED (${ratePct}%)`
+    : (obj.status === 'unstable' ? 'DESTABILIZING' : 'NOMINAL');
 
   positionSelectionVisuals(obj.mesh.position, obj.velocity, obj.radius * 4, hs);
   fillPredictedPath(predictGeo, obj.mesh.position, obj.velocity);

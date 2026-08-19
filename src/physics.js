@@ -36,6 +36,7 @@ import {
   createMoon,
   createComet,
   createNeutronStar,
+  computeTimeDilation,
 } from './objects.js';
 import { disintegrate, destroyObject, spawnEnergyRing, particleBurst } from './effects.js';
 import { cameraShake } from './camera.js';
@@ -272,14 +273,19 @@ export function integrateBodiesVerlet(dt) {
  */
 export function postStepBody(obj, dt) {
   if (obj._destroyed) return;
-  obj.age += dt * AGE_YEARS_PER_SIMSECOND;
 
   if (obj.type === 'blackhole') {
+    obj.timeDilation = 0.0;
+    obj.age += dt * AGE_YEARS_PER_SIMSECOND;
     updateTrail(obj.trail, obj.mesh.position, obj.velocity.length());
     return;
   }
 
   const pos = obj.mesh.position;
+  obj.timeDilation = computeTimeDilation(pos, obj.velocity, obj);
+  obj.properTime = (obj.properTime || 0) + dt * obj.timeDilation;
+  obj.age += dt * obj.timeDilation * AGE_YEARS_PER_SIMSECOND;
+
   const { bh, dist: r } = nearestBlackHole(pos);
 
   if (bh) {
@@ -378,7 +384,7 @@ export function postStepBody(obj, dt) {
   }
 
   updateTrail(obj.trail, pos, obj.velocity.length());
-  obj.core.rotation.y += dt * obj.rotationSpeed;
+  obj.core.rotation.y += dt * obj.timeDilation * obj.rotationSpeed;
 }
 
 /* ============================================================================

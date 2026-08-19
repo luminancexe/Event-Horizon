@@ -20,6 +20,7 @@ export const CONFIG = {
   lensStrength: 1.0,         // Gravitational lensing post-processing distortion strength
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
+  timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch
   debugMode: false,          // Physics debug HUD and overlay visibility
   overlayVelocity: false,    // Render velocity vector arrows
   overlayForce: false,       // Render net force vector arrows

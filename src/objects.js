@@ -19,6 +19,7 @@ import {
   TIDAL_MULT,
   DRAG_MULT,
   STAR_LIFESPAN_K,
+  AGE_YEARS_PER_SIMSECOND,
 } from './state.js';
 import { scene, createDiskMaterial } from './scene.js';
 import { makeGlowTexture, makeRingTexture, starGlowTex } from './textures.js';
@@ -322,6 +323,80 @@ export function randomOrbitPosition(minR, maxR) {
 }
 
 /* ============================================================================
+   RELATIVISTIC TIME DILATION SOLVER
+   ============================================================================ */
+
+const _tdRel = new THREE.Vector3();
+const _tdVRel = new THREE.Vector3();
+
+/**
+ * Evaluates the relativistic time dilation factor (gamma in [0.0, 1.0]) at a target position and velocity
+ * from surrounding black hole singularities.
+ *
+ * Uses a Kerr-inspired gravitational potential superposition and special-relativistic kinematic dilation:
+ *   Phi_net = sum_j ( (G * M_j * r_j) / (r_j^2 + a_len,j^2 * cos^2(theta_j)) )
+ *   gamma_grav = sqrt( max( 0, 1 - 2 * Phi_net / C_SIM^2 ) )
+ *   gamma_kin  = sqrt( max( 0, 1 - |v_rel|^2 / C_SIM^2 ) )
+ *   gamma      = gamma_grav * gamma_kin
+ *
+ * @param {THREE.Vector3} pos - Target test position.
+ * @param {THREE.Vector3|null} [vel] - Target velocity vector.
+ * @param {CelestialBody|null} [excludeObj] - Object to exclude (e.g. self).
+ * @returns {number} Time dilation factor in [0.0, 1.0].
+ */
+export function computeTimeDilation(pos, vel, excludeObj) {
+  if (!CONFIG.timeDilationEnabled) return 1.0;
+  const bhs = blackHoles();
+  if (!bhs.length) return 1.0;
+
+  let phiNet = 0;
+  let maxKinDilation = 1.0;
+
+  for (const bh of bhs) {
+    if (bh === excludeObj || bh._destroyed) continue;
+
+    _tdRel.set(
+      pos.x - bh.mesh.position.x,
+      pos.y - bh.mesh.position.y,
+      pos.z - bh.mesh.position.z
+    );
+    const r = _tdRel.length();
+    const rs = bh.schwarzschildRadius || (2 * CONFIG.G * bh.mass) / (C_SIM * C_SIM);
+    const rInfluence = Math.max(60 * rs, 75.0);
+    if (r > rInfluence) continue;
+
+    // Kerr angular momentum length scale: a_len = a * (r_s / 2)
+    const spin = bh.spin ?? 0;
+    const aLen = spin * (rs * 0.5);
+
+    // Colatitude angle relative to black hole spin axis
+    let cosTheta = 0;
+    if (r > 0.0001 && bh.spinDirection) {
+      cosTheta = (_tdRel.x * bh.spinDirection.x + _tdRel.y * bh.spinDirection.y + _tdRel.z * bh.spinDirection.z) / r;
+    }
+
+    // Kerr-inspired effective gravitational potential: Phi_eff = (G * M * r) / (r^2 + a_len^2 * cos^2(theta))
+    const denom = r * r + aLen * aLen * cosTheta * cosTheta;
+    const phiEff = denom > 0.0001 ? (CONFIG.G * bh.mass * r) / denom : (CONFIG.G * bh.mass) / (rs * 0.5);
+    phiNet += phiEff;
+
+    // Special-relativistic kinematic velocity dilation relative to local attractor
+    if (vel) {
+      _tdVRel.copy(vel).sub(bh.velocity);
+      const speedSq = Math.min(_tdVRel.lengthSq(), 0.999 * C_SIM * C_SIM);
+      const kinFactor = Math.sqrt(Math.max(0, 1 - speedSq / (C_SIM * C_SIM)));
+      if (kinFactor < maxKinDilation) maxKinDilation = kinFactor;
+    }
+  }
+
+  const gravArg = Math.max(0, 1 - (2 * phiNet) / (C_SIM * C_SIM));
+  const gammaGrav = Math.sqrt(gravArg);
+  const gamma = THREE.MathUtils.clamp(gammaGrav * maxKinDilation, 0.0, 1.0);
+
+  return gamma;
+}
+
+/* ============================================================================
    OBJECT ARCHITECTURE & ENTITY CLASS HIERARCHY
    ============================================================================ */
 
@@ -348,6 +423,8 @@ export class CelestialBody {
     if (this.parent) this.parent.children.push(this);
     this.status = 'stable';
     this.age = opts.age ?? 0;
+    this.properTime = opts.properTime ?? (opts.age ? opts.age / AGE_YEARS_PER_SIMSECOND : 0);
+    this.timeDilation = 1.0;
     this.lifecycleScale = 1;
     this.lastLog = {};
     this._destroyed = false;
@@ -356,6 +433,14 @@ export class CelestialBody {
 
   get position() {
     return this.mesh.position;
+  }
+
+  /**
+   * Local proper time rate multiplier relative to universal coordinate time.
+   * @returns {number}
+   */
+  get localTimeRate() {
+    return this.timeDilation;
   }
 
   /**

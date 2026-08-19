@@ -177,7 +177,8 @@ function animate() {
     }
     for (const b of state.bodies) {
       if (b.type === 'neutron') {
-        const pulse = 1 + 0.3 * Math.sin(state.simTime * 8 + b.id);
+        const t = b.properTime !== undefined ? b.properTime : state.simTime;
+        const pulse = 1 + 0.3 * Math.sin(t * 8 + b.id);
         b.core.scale.setScalar(pulse);
       }
     }

@@ -18,6 +18,7 @@ import {
   blackHoles,
   dominantBlackHole,
   resizeAllTrails,
+  computeTimeDilation,
 } from './objects.js';
 import { initAsteroids } from './asteroids.js';
 import { select, updateBreadcrumb } from './selection.js';
@@ -83,6 +84,23 @@ export function updateDebugHud() {
       ltMag > 0.00001 ? `${ltMag.toFixed(4)} u/s\u00b2` : '0.0000 (STATIC)';
   } else {
     $('dbg-sel-framedrag').textContent = '\u2014';
+  }
+
+  const elDbgDil = $('dbg-sel-dilation');
+  if (elDbgDil) {
+    if (selected && selected.type === 'blackhole') {
+      elDbgDil.textContent = '0.0000\u00d7 (HORIZON FROZEN)';
+    } else if (selected && selected.isAsteroid && pos && vel) {
+      const gamma = computeTimeDilation(pos, vel, null);
+      elDbgDil.textContent = `${(gamma * 100).toFixed(1)}% (${gamma.toFixed(4)}\u00d7)`;
+    } else if (selected && selected.timeDilation !== undefined) {
+      elDbgDil.textContent = `${(selected.timeDilation * 100).toFixed(1)}% (${selected.timeDilation.toFixed(4)}\u00d7)`;
+    } else if (pos && vel) {
+      const gamma = computeTimeDilation(pos, vel, selected);
+      elDbgDil.textContent = `${(gamma * 100).toFixed(1)}% (${gamma.toFixed(4)}\u00d7)`;
+    } else {
+      elDbgDil.textContent = '\u2014';
+    }
   }
 
   if (vel && pos) {
@@ -493,6 +511,14 @@ document.getElementById('btn-framedrag-toggle').addEventListener('click', () => 
   logEvent(`Frame-dragging simulation ${CONFIG.frameDragging ? 'enabled' : 'disabled'}.`, 'info');
 });
 
+document.getElementById('btn-timedilation-toggle').addEventListener('click', () => {
+  CONFIG.timeDilationEnabled = !CONFIG.timeDilationEnabled;
+  const btn = document.getElementById('btn-timedilation-toggle');
+  btn.textContent = CONFIG.timeDilationEnabled ? '\u25cf TIME DILATION: ON' : '\u25cb TIME DILATION: OFF';
+  btn.classList.toggle('off', !CONFIG.timeDilationEnabled);
+  logEvent(`Relativistic time dilation ${CONFIG.timeDilationEnabled ? 'enabled' : 'disabled'}.`, 'info');
+});
+
 document.getElementById('btn-debug').addEventListener('click', () => {
   CONFIG.debugMode = !CONFIG.debugMode;
   document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
@@ -551,6 +577,12 @@ export function syncUIFromConfig() {
   if (fdBtn) {
     fdBtn.textContent = CONFIG.frameDragging ? '\u25cf FRAME DRAGGING: ON' : '\u25cb FRAME DRAGGING: OFF';
     fdBtn.classList.toggle('off', !CONFIG.frameDragging);
+  }
+
+  const tdBtn = document.getElementById('btn-timedilation-toggle');
+  if (tdBtn) {
+    tdBtn.textContent = CONFIG.timeDilationEnabled ? '\u25cf TIME DILATION: ON' : '\u25cb TIME DILATION: OFF';
+    tdBtn.classList.toggle('off', !CONFIG.timeDilationEnabled);
   }
 
   const trailBtn = document.getElementById('btn-trails-toggle');
