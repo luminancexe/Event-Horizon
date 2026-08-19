@@ -27,6 +27,8 @@ export const CONFIG = {
   tdeCircularizationTimescale: 1.5, // Time constant (simulation seconds) for circularization velocity damping
   tdeCircVelocityThreshold: 0.08,  // Relative velocity ratio threshold (|v_rel| / v_circ) for circularization completion
   tdeMaxCircularizationTime: 3.5,   // Maximum duration (simulation seconds) for circularizing state before disk assimilation
+  tdeSpinEvolutionEnabled: true,    // Relativistic Kerr spin evolution from accretion angular momentum torque
+  tdeEddingtonLimitEnabled: true,   // Eddington luminosity and accretion rate diagnostics & clamping
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch
@@ -187,6 +189,7 @@ export const state = {
   activeTdeCount: 0,
   tdeEjectaMass: 0,
   tdeTotalAccretedMass: 0,
+  tdeTotalRadiatedMass: 0,
 
   // Camera animation and kinematic state
   cameraMode: 'free',

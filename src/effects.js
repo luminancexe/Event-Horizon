@@ -15,7 +15,7 @@ import { CONFIG, state } from './state.js';
 import { scene } from './scene.js';
 import { logEvent, showBanner } from './events.js';
 import { cameraShake } from './camera.js';
-import { createBlackHole, createNeutronStar, computeTimeDilation, blackHoles, bhRadii } from './objects.js';
+import { createBlackHole, createNeutronStar, computeTimeDilation, blackHoles, bhRadii, computeKerrISCOProperties } from './objects.js';
 import { computeTotalAcceleration } from './physics.js';
 import { spawnAsteroid } from './asteroids.js';
 import { unregisterSelectable, deselect } from './selection.js';
@@ -713,7 +713,11 @@ export class TDEStreamManager {
   }
 
   /**
-   * Advances viscous accretion flow from disk reservoirs into black hole singularities.
+   * Advances relativistic viscous accretion flow from disk reservoirs into black hole singularities.
+   * Couples mass-energy inflow, radiative loss, and Bardeen (1970) Kerr spin torque:
+   *   dM_rad = eta * dM0
+   *   dM_BH = (1 - eta) * dM0
+   *   da = ((L_ISCO - 2 * a * E_ISCO) / M_BH) * dM0
    *
    * @param {number} dt - Timestep in simulation seconds.
    */
@@ -723,11 +727,27 @@ export class TDEStreamManager {
       if (bh.diskMass > 0) {
         const tau = CONFIG.tdeViscousTimescale || 6.0;
         const mDot = tau > 0 ? bh.diskMass / tau : 0;
-        const dM = Math.min(bh.diskMass, mDot * dt);
-        if (dM > 0) {
-          bh.diskMass = Math.max(0, bh.diskMass - dM);
-          bh.mass += dM;
-          state.tdeTotalAccretedMass = (state.tdeTotalAccretedMass || 0) + dM;
+        const dM0 = Math.min(bh.diskMass, mDot * dt);
+        if (dM0 > 0) {
+          if (CONFIG.tdeSpinEvolutionEnabled) {
+            const props = computeKerrISCOProperties(bh.spin, bh.mass);
+            const eta = props.eta;
+            const dM_rad = eta * dM0;
+            const dM_BH = (1 - eta) * dM0;
+
+            // Evolve Kerr spin via Bardeen (1970) torque relation
+            const da = ((props.lISCO - 2 * (bh.spin ?? 0) * props.eISCO) / Math.max(bh.mass, 0.1)) * dM0;
+            bh.spin = THREE.MathUtils.clamp((bh.spin ?? 0) + da, -0.998, 0.998);
+
+            bh.diskMass = Math.max(0, bh.diskMass - dM0);
+            bh.mass += dM_BH;
+            state.tdeTotalRadiatedMass = (state.tdeTotalRadiatedMass || 0) + dM_rad;
+            state.tdeTotalAccretedMass = (state.tdeTotalAccretedMass || 0) + dM_BH;
+          } else {
+            bh.diskMass = Math.max(0, bh.diskMass - dM0);
+            bh.mass += dM0;
+            state.tdeTotalAccretedMass = (state.tdeTotalAccretedMass || 0) + dM0;
+          }
         }
       }
     }

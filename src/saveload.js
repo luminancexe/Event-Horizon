@@ -161,12 +161,13 @@ export function serializeUniverse() {
   state.bodies.forEach((b, i) => bodyIndex.set(b, i));
 
   return {
-    version: 4,
+    version: 5,
     config: { ...CONFIG },
     simTime: state.simTime,
     simYears: state.simYears,
     tdeEjectaMass: state.tdeEjectaMass ?? 0,
     tdeTotalAccretedMass: state.tdeTotalAccretedMass ?? 0,
+    tdeTotalRadiatedMass: state.tdeTotalRadiatedMass ?? 0,
     cameraMode: state.cameraMode,
     cameraPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
     cameraTarget: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
@@ -326,6 +327,7 @@ export function deserializeUniverse(data) {
   state.simYears = data.simYears || 0;
   state.tdeEjectaMass = data.tdeEjectaMass || 0;
   state.tdeTotalAccretedMass = data.tdeTotalAccretedMass || 0;
+  state.tdeTotalRadiatedMass = data.tdeTotalRadiatedMass || 0;
 
   // Phase 1: Recreate celestial bodies (prioritizing black holes for gravitational stability)
   const rawBodies = data.bodies || [];

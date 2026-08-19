@@ -550,6 +550,58 @@ export function inferBHClass(mass) {
 }
 
 /**
+ * Computes relativistic Kerr ISCO properties including dimensionless radius,
+ * specific energy, specific angular momentum, and radiative efficiency:
+ *   E_ISCO = (r^(3/2) - 2r^(1/2) + a) / (r^(3/4) * sqrt(r^(3/2) - 3r^(1/2) + 2a))
+ *   eta = 1 - E_ISCO
+ *   L_ISCO = s_orb * (r^2 - 2a*sqrt(r) + a^2) / (r^(3/4) * sqrt(r^(3/2) - 3r^(1/2) + 2a))
+ *
+ * @param {number} spin - Dimensionless Kerr spin parameter a in [-0.998, 0.998].
+ * @param {number} mass - Black hole mass in solar masses (M☉).
+ * @param {number} [sOrb] - Orbital direction (+1 for prograde, -1 for retrograde). Defaults based on spin sign.
+ * @returns {{ rISCO: number, rTildeISCO: number, eISCO: number, lISCO: number, eta: number }}
+ */
+export function computeKerrISCOProperties(spin, mass, sOrb) {
+  const a = THREE.MathUtils.clamp(spin ?? 0, -0.998, 0.998);
+  const mSafe = Math.max(mass || 0, 0.001);
+  const rs = (2 * CONFIG.G * mSafe) / (C_SIM * C_SIM);
+  const M = rs * 0.5;
+  const a2 = a * a;
+  const cbrt1PlusA = Math.cbrt(Math.max(0, 1 + a));
+  const cbrt1MinusA = Math.cbrt(Math.max(0, 1 - a));
+  const z1 = 1 + Math.cbrt(Math.max(0, 1 - a2)) * (cbrt1PlusA + cbrt1MinusA);
+  const z2 = Math.sqrt(3 * a2 + z1 * z1);
+  const signA = a > 0.0001 ? 1 : a < -0.0001 ? -1 : 0;
+  const innerTerm = Math.max(0, (3 - z1) * (3 + z1 + 2 * z2));
+  const rTilde = Math.max(1.0, 3 + z2 - signA * Math.sqrt(innerTerm));
+  const rISCO = rTilde * M;
+
+  // Specific energy and angular momentum at ISCO
+  const sqrtR = Math.sqrt(rTilde);
+  const r32 = rTilde * sqrtR;
+  const r34 = Math.pow(rTilde, 0.75);
+  const denomCore = Math.max(1e-5, r32 - 3 * sqrtR + 2 * a);
+  const sqrtDenom = Math.sqrt(denomCore);
+  const denom = Math.max(1e-5, r34 * sqrtDenom);
+
+  const numE = r32 - 2 * sqrtR + a;
+  const eISCO = THREE.MathUtils.clamp(numE / denom, 0.0, 1.0);
+  const eta = THREE.MathUtils.clamp(1.0 - eISCO, 0.01, 0.45);
+
+  const s = sOrb !== undefined ? sOrb : (a >= 0 ? 1 : -1);
+  const numL = s * (rTilde * rTilde - 2 * a * sqrtR + a2);
+  const lISCO = numL / denom;
+
+  return {
+    rISCO,
+    rTildeISCO: rTilde,
+    eISCO,
+    lISCO,
+    eta,
+  };
+}
+
+/**
  * Computes the physical Kerr Innermost Stable Circular Orbit (ISCO) radius in simulation distance units:
  *   Z1 = 1 + (1 - a^2)^(1/3) * ((1 + a)^(1/3) + (1 - a)^(1/3))
  *   Z2 = sqrt(3*a^2 + Z1^2)
@@ -619,6 +671,47 @@ export class BlackHole extends CelestialBody {
     const tau = CONFIG.tdeViscousTimescale || 6.0;
     if (this.diskMass <= 0 || tau <= 0) return 0;
     return this.diskMass / tau;
+  }
+
+  /**
+   * Relativistic radiative accretion efficiency eta = 1 - E_ISCO based on Kerr spin:
+   *   eta in [0.038 (retrograde), 0.057 (Schwarzschild), 0.324 (near-maximal prograde)]
+   * @returns {number}
+   */
+  get accretionEfficiency() {
+    return computeKerrISCOProperties(this.spin, this.mass).eta;
+  }
+
+  /**
+   * Physical accretion luminosity in simulation units (L_acc = eta * M_dot * c^2):
+   * @returns {number}
+   */
+  get accretionLuminosity() {
+    const mDot = this.accretionRate;
+    if (mDot <= 0) return 0;
+    const eta = this.accretionEfficiency;
+    return eta * mDot * (C_SIM * C_SIM);
+  }
+
+  /**
+   * Eddington luminosity scale for the singularity (L_Edd = k_Edd * M_BH * c^2):
+   *   k_Edd = 1.26e-5 s^-1
+   * @returns {number}
+   */
+  get eddingtonLuminosity() {
+    if (this.mass <= 0) return 0;
+    const kEdd = 1.26e-5;
+    return kEdd * this.mass * (C_SIM * C_SIM);
+  }
+
+  /**
+   * Dimensionless Eddington accretion ratio (lambda_Edd = L_acc / L_Edd):
+   * @returns {number}
+   */
+  get eddingtonRatio() {
+    const lEdd = this.eddingtonLuminosity;
+    if (lEdd <= 0) return 0;
+    return this.accretionLuminosity / lEdd;
   }
 
   /**
