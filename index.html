@@ -58,12 +58,14 @@
       <div class="debug-row divider"><span>SELECTED OBJECT</span></div>
       <div class="debug-row"><span>VELOCITY</span><b id="dbg-sel-vel">-</b></div>
       <div class="debug-row"><span>ACCELERATION</span><b id="dbg-sel-acc">-</b></div>
+      <div class="debug-row"><span>FRAME DRAG ACC</span><b id="dbg-sel-framedrag">-</b></div>
       <div class="debug-row"><span>KINETIC ENERGY</span><b id="dbg-sel-ke">-</b></div>
       <div class="debug-row"><span>POTENTIAL ENERGY</span><b id="dbg-sel-pe">-</b></div>
       <div class="debug-row divider"><span>VISUAL OVERLAYS</span></div>
       <label class="debug-check"><input type="checkbox" id="ov-velocity"> Velocity vectors</label>
       <label class="debug-check"><input type="checkbox" id="ov-force"> Force vectors</label>
       <label class="debug-check"><input type="checkbox" id="ov-accel"> Acceleration vectors</label>
+      <label class="debug-check"><input type="checkbox" id="ov-framedrag"> Frame Dragging vector</label>
       <label class="debug-check"><input type="checkbox" id="ov-paths" checked> Orbital paths</label>
       <label class="debug-check"><input type="checkbox" id="ov-com"> Center of mass</label>
       <label class="debug-check"><input type="checkbox" id="ov-collision"> Collision radii</label>
@@ -110,6 +112,7 @@
         <span>TIMESTEP (SUB-STEP SIZE)</span><span class="val" id="val-substep">0.12</span>
         <input type="range" id="slider-substep" min="0.02" max="0.3" step="0.01" value="0.12">
       </label>
+      <button id="btn-framedrag-toggle" class="wide-btn active-toggle" title="Toggle Kerr-inspired Lense-Thirring frame-dragging acceleration around rotating black holes.">&#9679; FRAME DRAGGING: ON</button>
     </div>
 
     <div class="panel-section">

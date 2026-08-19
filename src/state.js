@@ -19,10 +19,12 @@ export const CONFIG = {
   diskBrightness: 1.0,       // Accretion disk shader intensity multiplier
   lensStrength: 1.0,         // Gravitational lensing post-processing distortion strength
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
+  frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   debugMode: false,          // Physics debug HUD and overlay visibility
   overlayVelocity: false,    // Render velocity vector arrows
   overlayForce: false,       // Render net force vector arrows
   overlayAccel: false,       // Render net acceleration vector arrows
+  overlayFrameDrag: false,   // Render Lense-Thirring frame-dragging acceleration vector arrows
   overlayPaths: true,        // Render orbital trajectory trails
   overlayCOM: false,         // Render system center of mass indicator
   overlayCollision: false,   // Render collision boundary wireframes
@@ -126,6 +128,16 @@ export const COLLISION_MERGE_SPEED = 12;
 
 /** Grace period (ms) following body creation during which collision checks are suppressed */
 export const COLLISION_GRACE_MS = 900;
+
+/**
+ * Emergency numerical clamping ceiling (u/s^2) applied strictly to prevent NaN/Infinity
+ * propagation during extreme near-singularity coordinate encounters or high timeScale values.
+ * NOTE: This is an engine crash prevention safeguard, NOT a physical relativistic limit.
+ */
+export const NUMERICAL_SAFETY_LIMIT = 250.0;
+
+/** Scaling factor applied to Kerr Lense-Thirring frame-dragging acceleration */
+export const FRAME_DRAG_SCALE = 1.0;
 
 /* ============================================================================
    SHARED RUNTIME STATE CONTAINER

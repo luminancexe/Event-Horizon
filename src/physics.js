@@ -16,11 +16,14 @@ import * as THREE from 'three';
 import {
   CONFIG,
   state,
+  C_SIM,
   SOFTENING,
   ESCAPE_R,
   AGE_YEARS_PER_SIMSECOND,
   COLLISION_MERGE_SPEED,
   COLLISION_GRACE_MS,
+  NUMERICAL_SAFETY_LIMIT,
+  FRAME_DRAG_SCALE,
 } from './state.js';
 import {
   updateTrail,
@@ -40,30 +43,38 @@ import { logEvent, showBanner } from './events.js';
 import { spawnAsteroid } from './asteroids.js';
 
 /* ============================================================================
-   N-BODY GRAVITATIONAL ACCELERATION
+   ZERO-ALLOCATION SCRATCH VECTOR POOL
+   ============================================================================ */
+
+const _vPred = new THREE.Vector3();
+const _vRel = new THREE.Vector3();
+const _rRel = new THREE.Vector3();
+const _rHat = new THREE.Vector3();
+const _bgVec = new THREE.Vector3();
+const _ltAcc = new THREE.Vector3();
+const _scratchLT = new THREE.Vector3();
+
+/* ============================================================================
+   N-BODY GRAVITATIONAL & RELATIVISTIC ACCELERATION SOLVERS
    ============================================================================ */
 
 /**
- * Computes net gravitational acceleration at a target point from an array of source bodies.
- * Uses Newton's universal law of gravitation with Plummer softening:
+ * Computes direct-sum Newtonian gravitational acceleration with Plummer softening:
  *
- *   a = sum_j ( G * M_j * (r_j - r) / ( |r_j - r|^2 + epsilon^2 )^(3/2) )
- *
- * The softening factor (epsilon = SOFTENING) prevents infinite force singularities
- * during close encounters without altering long-range orbital trajectories.
+ *   a_Newt = sum_j ( G * M_j * (r_j - r) / ( |r_j - r|^2 + epsilon^2 )^(3/2) )
  *
  * @param {THREE.Vector3} pos - Target test position.
  * @param {CelestialBody|null} excludeObj - Body to exclude from source sum (e.g. self-interaction).
  * @param {CelestialBody[]} sources - Array of massive celestial bodies.
  * @param {THREE.Vector3} [out] - Optional destination vector to avoid memory allocation.
- * @returns {THREE.Vector3} Net acceleration vector.
+ * @returns {THREE.Vector3} Net Newtonian acceleration vector.
  */
-export function computeAcceleration(pos, excludeObj, sources, out) {
+export function computeNewtonianAcceleration(pos, excludeObj, sources, out) {
   const accel = out ? out.set(0, 0, 0) : new THREE.Vector3();
   if (!CONFIG.gravityEnabled) return accel;
 
   for (const s of sources) {
-    if (s === excludeObj) continue;
+    if (s === excludeObj || s._destroyed) continue;
     const dx = s.mesh.position.x - pos.x;
     const dy = s.mesh.position.y - pos.y;
     const dz = s.mesh.position.z - pos.z;
@@ -81,20 +92,143 @@ export function computeAcceleration(pos, excludeObj, sources, out) {
   return accel;
 }
 
+/**
+ * Computes weak-field Kerr/Lense-Thirring frame-dragging acceleration:
+ *
+ *   B_g = (G / (C_SIM^2 * r_soft^3)) * [ 3*(J . r_hat)*r_hat - J ]
+ *   a_LT = 2 * (v_rel x B_g)
+ *
+ * Evaluates additive contributions from all active rotating singularities (s.spin != 0).
+ * Bypasses calculation beyond the physical influence cutoff (r > max(60 * r_s, 75)).
+ *
+ * @param {THREE.Vector3} pos - Target test position.
+ * @param {THREE.Vector3} vel - Target test velocity.
+ * @param {CelestialBody|null} excludeObj - Body to exclude from source sum.
+ * @param {CelestialBody[]} sources - Array of massive celestial bodies.
+ * @param {THREE.Vector3} [out] - Optional destination vector.
+ * @returns {THREE.Vector3} Net Lense-Thirring acceleration vector.
+ */
+export function computeLenseThirringAcceleration(pos, vel, excludeObj, sources, out) {
+  const accel = out ? out.set(0, 0, 0) : new THREE.Vector3();
+  if (!CONFIG.frameDragging || !CONFIG.gravityEnabled || !vel) return accel;
+
+  for (const s of sources) {
+    if (s === excludeObj || s._destroyed || s.type !== 'blackhole') continue;
+    const spin = s.spin;
+    if (Math.abs(spin) < 0.001) continue;
+
+    // Relative displacement vector pointing from black hole to test position
+    _rRel.set(
+      pos.x - s.mesh.position.x,
+      pos.y - s.mesh.position.y,
+      pos.z - s.mesh.position.z
+    );
+    const r = _rRel.length();
+
+    // Influence radius derived from relativistic Schwarzschild scale
+    const rs = s.schwarzschildRadius || (2 * CONFIG.G * s.mass) / (C_SIM * C_SIM);
+    const rInfluence = Math.max(60 * rs, 75.0);
+    if (r > rInfluence) continue;
+
+    // Relative velocity: v_rel = v_body - v_bh
+    _vRel.copy(vel).sub(s.velocity);
+
+    // Normalized radial direction
+    if (r > 0.0001) {
+      _rHat.copy(_rRel).multiplyScalar(1 / r);
+    } else {
+      _rHat.set(0, 1, 0);
+    }
+
+    // Singularity angular momentum vector: J = J_sim * S_hat
+    const J_mag = s.angularMomentumSim !== undefined
+      ? s.angularMomentumSim
+      : (spin * CONFIG.G * s.mass * s.mass) / C_SIM;
+    const S_hat = s.spinDirection || new THREE.Vector3(0, 1, 0);
+    const Jx = S_hat.x * J_mag;
+    const Jy = S_hat.y * J_mag;
+    const Jz = S_hat.z * J_mag;
+
+    // Softened distance to prevent infinite force spikes near coordinate singularities
+    const distSq = r * r + SOFTENING * SOFTENING;
+    const distSoft = Math.sqrt(distSq);
+    const distSoft3 = distSq * distSoft;
+
+    // Gravito-magnetic dipole field: B_g = (G / (C_SIM^2 * r_soft^3)) * [ 3*(J . r_hat)*r_hat - J ]
+    const jDotR = Jx * _rHat.x + Jy * _rHat.y + Jz * _rHat.z;
+    const factor = (CONFIG.G * FRAME_DRAG_SCALE) / (C_SIM * C_SIM * distSoft3);
+
+    _bgVec.set(
+      factor * (3 * jDotR * _rHat.x - Jx),
+      factor * (3 * jDotR * _rHat.y - Jy),
+      factor * (3 * jDotR * _rHat.z - Jz)
+    );
+
+    // Gravito-Lorentz acceleration: a_LT = 2 * (v_rel x B_g)
+    _ltAcc.set(
+      2 * (_vRel.y * _bgVec.z - _vRel.z * _bgVec.y),
+      2 * (_vRel.z * _bgVec.x - _vRel.x * _bgVec.z),
+      2 * (_vRel.x * _bgVec.y - _vRel.y * _bgVec.x)
+    );
+
+    // Emergency numerical safety limit (engine crash prevention guard)
+    const ltLen = _ltAcc.length();
+    if (ltLen > NUMERICAL_SAFETY_LIMIT) {
+      _ltAcc.multiplyScalar(NUMERICAL_SAFETY_LIMIT / ltLen);
+    }
+
+    accel.add(_ltAcc);
+  }
+  return accel;
+}
+
+/**
+ * Evaluates the total combined acceleration:
+ *   a_total = a_Newtonian + a_LenseThirring
+ *
+ * @param {THREE.Vector3} pos - Target position.
+ * @param {THREE.Vector3|null} vel - Target velocity (optional for frame-dragging).
+ * @param {CelestialBody|null} excludeObj - Excluded body instance.
+ * @param {CelestialBody[]} sources - Source bodies.
+ * @param {THREE.Vector3} [out] - Output vector.
+ * @returns {THREE.Vector3}
+ */
+export function computeTotalAcceleration(pos, vel, excludeObj, sources, out) {
+  const accel = out ? out.set(0, 0, 0) : new THREE.Vector3();
+  computeNewtonianAcceleration(pos, excludeObj, sources, accel);
+  if (CONFIG.frameDragging && vel) {
+    computeLenseThirringAcceleration(pos, vel, excludeObj, sources, _scratchLT);
+    accel.add(_scratchLT);
+  }
+  return accel;
+}
+
+/**
+ * Backward-compatible acceleration solver wrapper.
+ *
+ * @param {THREE.Vector3} pos - Target test position.
+ * @param {CelestialBody|null} excludeObj - Excluded body.
+ * @param {CelestialBody[]} sources - Source bodies.
+ * @param {THREE.Vector3} [out] - Destination vector.
+ * @param {THREE.Vector3} [vel] - Optional velocity for frame-dragging.
+ * @returns {THREE.Vector3}
+ */
+export function computeAcceleration(pos, excludeObj, sources, out, vel) {
+  return computeTotalAcceleration(pos, vel, excludeObj, sources, out);
+}
+
 /* ============================================================================
-   NUMERICAL INTEGRATION (VELOCITY VERLET)
+   NUMERICAL INTEGRATION (ADAPTED PREDICTOR-CORRECTOR VERLET)
    ============================================================================ */
 
 /**
  * Advances the positions and velocities of all active massive bodies over a timestep dt
- * using the second-order symplectic Velocity Verlet integration scheme:
+ * using an adapted second-order velocity-predictor/corrector Verlet scheme:
  *
  *   1. x(t + dt) = x(t) + v(t) * dt + 0.5 * a(t) * dt^2
- *   2. a(t + dt) = F(x(t + dt)) / m
- *   3. v(t + dt) = v(t) + 0.5 * (a(t) + a(t + dt)) * dt
- *
- * Unlike explicit Euler integration, Velocity Verlet preserves phase space volume (symplectic),
- * preventing artificial orbital drift and maintaining long-term energy conservation.
+ *   2. v_pred = v(t) + 0.5 * a(t) * dt
+ *   3. a(t + dt) = a_Newtonian(x(t + dt)) + a_LT(x(t + dt), v_pred)
+ *   4. v(t + dt) = v_pred + 0.5 * a(t + dt) * dt
  *
  * @param {number} dt - Timestep in simulation seconds.
  */
@@ -107,12 +241,13 @@ export function integrateBodiesVerlet(dt) {
     b.mesh.position.addScaledVector(b.acceleration, 0.5 * dt * dt);
   }
 
-  // Step 2: Evaluate new accelerations at the advanced positions
+  // Step 2 & 3: Evaluate predicted velocity and calculate new total acceleration
   for (const b of list) {
-    computeAcceleration(b.mesh.position, b, state.bodies, b._newAcceleration);
+    _vPred.copy(b.velocity).addScaledVector(b.acceleration, 0.5 * dt);
+    computeTotalAcceleration(b.mesh.position, _vPred, b, state.bodies, b._newAcceleration);
   }
 
-  // Step 3: Complete velocity update using trapezoidal acceleration average
+  // Step 4: Complete velocity corrector step using trapezoidal acceleration average
   for (const b of list) {
     b.velocity.addScaledVector(b.acceleration, 0.5 * dt);
     b.velocity.addScaledVector(b._newAcceleration, 0.5 * dt);

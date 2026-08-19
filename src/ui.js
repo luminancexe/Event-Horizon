@@ -23,6 +23,7 @@ import { initAsteroids } from './asteroids.js';
 import { select, updateBreadcrumb } from './selection.js';
 import { flyCameraTo, setCameraMode } from './camera.js';
 import { logEvent } from './events.js';
+import { computeLenseThirringAcceleration } from './physics.js';
 
 /* ============================================================================
    PHYSICS TELEMETRY DEBUG HUD
@@ -64,6 +65,26 @@ export function updateDebugHud() {
     pos = selected.mesh.position;
   }
 
+  if (selected && selected.type === 'blackhole') {
+    $('dbg-sel-framedrag').textContent =
+      selected.rotationModel === 'kerr'
+        ? `KERR (a=${selected.spin >= 0 ? '+' : ''}${selected.spin.toFixed(2)})`
+        : 'STATIC (SCHWARZSCHILD)';
+  } else if (vel && pos) {
+    computeLenseThirringAcceleration(
+      pos,
+      vel,
+      selected.isAsteroid ? null : selected,
+      state.bodies,
+      _scratchLTOverlay
+    );
+    const ltMag = _scratchLTOverlay.length();
+    $('dbg-sel-framedrag').textContent =
+      ltMag > 0.00001 ? `${ltMag.toFixed(4)} u/s\u00b2` : '0.0000 (STATIC)';
+  } else {
+    $('dbg-sel-framedrag').textContent = '\u2014';
+  }
+
   if (vel && pos) {
     $('dbg-sel-vel').textContent = `${vel.length().toFixed(3)} u/s`;
     $('dbg-sel-acc').textContent = acc ? `${acc.length().toFixed(4)} u/s\u00b2` : '\u2014';
@@ -90,6 +111,7 @@ export function updateDebugHud() {
    VISUAL DEBUG OVERLAYS (VECTORS, CENTER OF MASS, COLLISION BOUNDS)
    ============================================================================ */
 
+const _scratchLTOverlay = new THREE.Vector3();
 const comMarkerTex = makeRingTexture('rgba(180,255,150,0.95)');
 const comMarker = new THREE.Sprite(
   new THREE.SpriteMaterial({
@@ -146,6 +168,18 @@ function ensureDebugHelpers(obj) {
     obj._accArrow.visible = false;
     scene.add(obj._accArrow);
   }
+  if (!obj._frameDragArrow) {
+    obj._frameDragArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(),
+      1,
+      0xb5179e,
+      1.6,
+      0.9
+    );
+    obj._frameDragArrow.visible = false;
+    scene.add(obj._frameDragArrow);
+  }
   if (!obj._collisionSphere) {
     obj._collisionSphere = new THREE.Mesh(
       new THREE.SphereGeometry(1, 14, 10),
@@ -170,6 +204,7 @@ function hideDebugHelpers(obj) {
   if (obj._velArrow) obj._velArrow.visible = false;
   if (obj._forceArrow) obj._forceArrow.visible = false;
   if (obj._accArrow) obj._accArrow.visible = false;
+  if (obj._frameDragArrow) obj._frameDragArrow.visible = false;
   if (obj._collisionSphere) obj._collisionSphere.visible = false;
 }
 
@@ -183,6 +218,7 @@ export function updateDebugOverlays() {
     (CONFIG.overlayVelocity ||
       CONFIG.overlayForce ||
       CONFIG.overlayAccel ||
+      CONFIG.overlayFrameDrag ||
       CONFIG.overlayCollision);
 
   for (const b of state.bodies) {
@@ -226,7 +262,23 @@ export function updateDebugOverlays() {
       b._forceArrow.visible = false;
     }
 
-    // 4. Collision boundary wireframe
+    // 4. Frame-dragging acceleration vector arrow (Lense-Thirring)
+    if (CONFIG.overlayFrameDrag && b.velocity && b.type !== 'blackhole') {
+      computeLenseThirringAcceleration(b.mesh.position, b.velocity, b, state.bodies, _scratchLTOverlay);
+      const ltLen = _scratchLTOverlay.length();
+      if (ltLen > 0.0001) {
+        b._frameDragArrow.visible = true;
+        b._frameDragArrow.position.copy(pos);
+        b._frameDragArrow.setDirection(_scratchLTOverlay.clone().normalize());
+        b._frameDragArrow.setLength(Math.min(ltLen * 60 + 1, 70), 1.6, 0.8);
+      } else {
+        b._frameDragArrow.visible = false;
+      }
+    } else if (b._frameDragArrow) {
+      b._frameDragArrow.visible = false;
+    }
+
+    // 5. Collision boundary wireframe
     if (CONFIG.overlayCollision && b.type !== 'blackhole') {
       b._collisionSphere.visible = true;
       b._collisionSphere.position.copy(pos);
@@ -433,6 +485,14 @@ document.getElementById('btn-gravity-toggle').addEventListener('click', () => {
   logEvent(`Gravity simulation ${CONFIG.gravityEnabled ? 'enabled' : 'disabled'}.`, 'info');
 });
 
+document.getElementById('btn-framedrag-toggle').addEventListener('click', () => {
+  CONFIG.frameDragging = !CONFIG.frameDragging;
+  const btn = document.getElementById('btn-framedrag-toggle');
+  btn.textContent = CONFIG.frameDragging ? '\u25cf FRAME DRAGGING: ON' : '\u25cb FRAME DRAGGING: OFF';
+  btn.classList.toggle('off', !CONFIG.frameDragging);
+  logEvent(`Frame-dragging simulation ${CONFIG.frameDragging ? 'enabled' : 'disabled'}.`, 'info');
+});
+
 document.getElementById('btn-debug').addEventListener('click', () => {
   CONFIG.debugMode = !CONFIG.debugMode;
   document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
@@ -442,6 +502,7 @@ const OVERLAY_CHECKBOXES = {
   'ov-velocity': 'overlayVelocity',
   'ov-force': 'overlayForce',
   'ov-accel': 'overlayAccel',
+  'ov-framedrag': 'overlayFrameDrag',
   'ov-paths': 'overlayPaths',
   'ov-com': 'overlayCOM',
   'ov-collision': 'overlayCollision',
@@ -449,6 +510,7 @@ const OVERLAY_CHECKBOXES = {
 
 for (const [id, key] of Object.entries(OVERLAY_CHECKBOXES)) {
   const el = document.getElementById(id);
+  if (!el) continue;
   el.checked = CONFIG[key];
   el.addEventListener('change', () => {
     CONFIG[key] = el.checked;
@@ -465,8 +527,10 @@ for (const [id, key] of Object.entries(OVERLAY_CHECKBOXES)) {
  */
 export function syncUIFromConfig() {
   const setSlider = (id, valId, v, digits) => {
-    document.getElementById(id).value = v;
-    document.getElementById(valId).textContent = digits === 0 ? v : v.toFixed(digits);
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(valId);
+    if (el) el.value = v;
+    if (valEl) valEl.textContent = digits === 0 ? v : v.toFixed(digits);
   };
 
   setSlider('slider-mass', 'val-mass', CONFIG.blackHoleMass, 0);
@@ -478,15 +542,28 @@ export function syncUIFromConfig() {
   setSlider('slider-traillen', 'val-traillen', CONFIG.trailLength, 0);
 
   const gravBtn = document.getElementById('btn-gravity-toggle');
-  gravBtn.textContent = CONFIG.gravityEnabled ? '\u25cf GRAVITY: ON' : '\u25cb GRAVITY: OFF';
-  gravBtn.classList.toggle('off', !CONFIG.gravityEnabled);
+  if (gravBtn) {
+    gravBtn.textContent = CONFIG.gravityEnabled ? '\u25cf GRAVITY: ON' : '\u25cb GRAVITY: OFF';
+    gravBtn.classList.toggle('off', !CONFIG.gravityEnabled);
+  }
+
+  const fdBtn = document.getElementById('btn-framedrag-toggle');
+  if (fdBtn) {
+    fdBtn.textContent = CONFIG.frameDragging ? '\u25cf FRAME DRAGGING: ON' : '\u25cb FRAME DRAGGING: OFF';
+    fdBtn.classList.toggle('off', !CONFIG.frameDragging);
+  }
 
   const trailBtn = document.getElementById('btn-trails-toggle');
-  trailBtn.textContent = CONFIG.trailsEnabled ? '\u25cf TRAILS: ON' : '\u25cb TRAILS: OFF';
-  trailBtn.classList.toggle('off', !CONFIG.trailsEnabled);
+  if (trailBtn) {
+    trailBtn.textContent = CONFIG.trailsEnabled ? '\u25cf TRAILS: ON' : '\u25cb TRAILS: OFF';
+    trailBtn.classList.toggle('off', !CONFIG.trailsEnabled);
+  }
 
-  document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
+  const debugHud = document.getElementById('debug-hud');
+  if (debugHud) debugHud.classList.toggle('hidden', !CONFIG.debugMode);
+
   for (const [id, key] of Object.entries(OVERLAY_CHECKBOXES)) {
-    document.getElementById(id).checked = CONFIG[key];
+    const el = document.getElementById(id);
+    if (el) el.checked = CONFIG[key];
   }
 }

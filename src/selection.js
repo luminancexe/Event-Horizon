@@ -340,7 +340,9 @@ export function updateInfoPanel() {
 
     $('info-name').textContent = bh.name;
     $('info-type').textContent = classLabel;
-    $('info-parent').textContent = '—';
+    $('info-parent').textContent = bh.spinDirection
+      ? `\u015c: (${bh.spinDirection.x.toFixed(1)}, ${bh.spinDirection.y.toFixed(1)}, ${bh.spinDirection.z.toFixed(1)})`
+      : '—';
     $('info-mass').textContent = bh.mass.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' M☉';
     $('info-distance').textContent = (bh.mesh.position.length() / 10).toFixed(2) + ' AU';
     $('info-velocity').textContent = (bh.velocity.length() / C_SIM).toFixed(2) + 'c';
@@ -350,8 +352,13 @@ export function updateInfoPanel() {
     $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';
     $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU`;
     $('info-tidal').textContent = 'EXTREME';
-    $('info-influence').textContent = bh.bhClass === 'supermassive' ? 'GALACTIC CORE' : 'LOCAL SYSTEM';
-    $('info-status').textContent = bh.rotationModel === 'kerr' ? 'ROTATING (KERR)' : 'STATIC (SCHWARZSCHILD)';
+    $('info-influence').textContent = bh.angularMomentumSim !== undefined
+      ? `J: ${Math.abs(bh.angularMomentumSim).toExponential(2)}`
+      : bh.bhClass === 'supermassive' ? 'GALACTIC CORE' : 'LOCAL SYSTEM';
+    $('info-status').textContent =
+      bh.rotationModel === 'kerr'
+        ? (CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED')
+        : 'STATIC (SCHWARZSCHILD)';
     positionSelectionVisuals(bh.mesh.position, bh.velocity, bh.visualRadius * 2.6, null);
     return;
   }

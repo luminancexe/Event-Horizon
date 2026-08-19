@@ -142,7 +142,7 @@ export function updateAsteroids(dt) {
   // Pass 2: Re-evaluate acceleration, complete velocity step, and bin into spatial grid
   for (const i of live) {
     const pos = aPos[i];
-    computeAcceleration(pos, null, state.bodies, aNewAcc[i]);
+    computeAcceleration(pos, null, state.bodies, aNewAcc[i], aVel[i]);
     aVel[i].addScaledVector(aAcc[i], 0.5 * dt);
     aVel[i].addScaledVector(aNewAcc[i], 0.5 * dt);
 
