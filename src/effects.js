@@ -478,6 +478,7 @@ export class TDEStreamManager {
           _scratchTdeDummy.position.set(0, -99999, 0);
           _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
           _scratchTdeDummy.updateMatrix();
+          this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
           matrixNeedsUpdate = true;
           captured = true;
           break;
