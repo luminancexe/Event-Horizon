@@ -453,7 +453,9 @@ bindSlider('slider-asteroids', (v) => {
 
 bindSlider('slider-disk', (v) => {
   CONFIG.diskBrightness = v;
-  for (const bh of blackHoles()) bh.diskMat.uniforms.uBrightness.value = v;
+  for (const bh of blackHoles()) {
+    if (bh.diskMat) bh.diskMat.uniforms.uBrightness.value = v;
+  }
   document.getElementById('val-disk').textContent = v.toFixed(2);
 });
 

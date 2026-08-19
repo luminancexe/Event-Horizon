@@ -248,7 +248,9 @@ function animate() {
   }
 
   for (const bh of blackHoles()) {
-    bh.photonSprite.material.rotation += rawDt * 0.05;
+    if (bh.photonSprite) {
+      bh.photonSprite.material.rotation += rawDt * 0.05;
+    }
   }
 
   if (state.selected) {
