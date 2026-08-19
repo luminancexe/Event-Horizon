@@ -55,6 +55,8 @@ createBlackHole({
   velocity: new THREE.Vector3(),
   mass: CONFIG.blackHoleMass,
   name: 'SAGITTARIUS PRIME',
+  bhClass: 'supermassive',
+  spin: 0.85,
 });
 
 initAsteroids(CONFIG.asteroidCount);

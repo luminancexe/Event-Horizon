@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three';
-import { CONFIG, state } from './state.js';
+import { CONFIG, state, BH_MASS_CLASSES } from './state.js';
 import { camera, controls } from './scene.js';
 import { setCameraMode } from './camera.js';
 import { deselect, select, selectAsteroid, updateBreadcrumb } from './selection.js';
@@ -23,6 +23,7 @@ import {
   createComet,
   createNeutronStar,
   orbitalVelocity,
+  inferBHClass,
 } from './objects.js';
 import { initAsteroids } from './asteroids.js';
 import { destroyObject, clearFragments } from './effects.js';
@@ -174,6 +175,11 @@ export function serializeUniverse() {
       radius: b.radius,
       position: { x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z },
       velocity: { x: b.velocity.x, y: b.velocity.y, z: b.velocity.z },
+      bhClass: b.bhClass,
+      spin: b.spin,
+      spinDirection: b.spinDirection
+        ? { x: b.spinDirection.x, y: b.spinDirection.y, z: b.spinDirection.z }
+        : undefined,
       tempK: b.tempK,
       age: b.age,
       lifespan: b.lifespan,
@@ -213,8 +219,17 @@ function restoreBody(bd) {
   };
 
   let obj = null;
-  if (bd.type === 'blackhole') obj = createBlackHole(opts);
-  else if (bd.type === 'star') obj = createStar(opts);
+  if (bd.type === 'blackhole') {
+    const bhClass = bd.bhClass || inferBHClass(bd.mass);
+    const spin = bd.spin !== undefined ? bd.spin : (BH_MASS_CLASSES[bhClass]?.defaultSpin ?? 0.0);
+    const spinDirection = bd.spinDirection
+      ? new THREE.Vector3(bd.spinDirection.x, bd.spinDirection.y, bd.spinDirection.z)
+      : new THREE.Vector3(0, 1, 0);
+    opts.bhClass = bhClass;
+    opts.spin = spin;
+    opts.spinDirection = spinDirection;
+    obj = createBlackHole(opts);
+  } else if (bd.type === 'star') obj = createStar(opts);
   else if (bd.type === 'planet') obj = createPlanet(opts);
   else if (bd.type === 'moon') obj = createMoon(opts);
   else if (bd.type === 'comet') obj = createComet(opts);

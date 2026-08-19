@@ -35,6 +35,56 @@ export const CONFIG = {
    ASTROPHYSICAL AND NUMERICAL CONSTANTS
    ============================================================================ */
 
+/** Relativistic reference speed of light constant (simulation velocity units: u/s) */
+export const C_SIM = 60;
+
+/**
+ * Standard mass classifications for black hole singularities.
+ * Decoupled from spin (any mass class can possess arbitrary Schwarzschild or Kerr spin).
+ */
+export const BH_MASS_CLASSES = {
+  supermassive: {
+    id: 'supermassive',
+    label: 'Supermassive Singularity',
+    massRange: [1000, 20000],
+    defaultMass: 5000,
+    defaultSpin: 0.85,
+    hasDisk: true,
+    diskScale: 6.5,
+    description: 'Galactic-core supermassive black hole with an extensive accretion disk.',
+  },
+  intermediate: {
+    id: 'intermediate',
+    label: 'Intermediate-Mass Black Hole',
+    massRange: [100, 1000],
+    defaultMass: 450,
+    defaultSpin: 0.50,
+    hasDisk: true,
+    diskScale: 5.0,
+    description: 'Mid-scale black hole formed in dense stellar clusters.',
+  },
+  stellar: {
+    id: 'stellar',
+    label: 'Stellar Black Hole',
+    massRange: [10, 100],
+    defaultMass: 35,
+    defaultSpin: 0.70,
+    hasDisk: true,
+    diskScale: 4.0,
+    description: 'Compact remnant of a massive star core-collapse supernova.',
+  },
+  primordial: {
+    id: 'primordial',
+    label: 'Primordial Micro Singularity',
+    massRange: [0.5, 10],
+    defaultMass: 3.5,
+    defaultSpin: 0.00,
+    hasDisk: false,
+    diskScale: 0.0,
+    description: 'Early-universe micro black hole exhibiting high-energy evaporation glow.',
+  },
+};
+
 /** Visual radius of a standard 5000 M☉ black hole event horizon */
 export const BASE_HORIZON = 9;
 

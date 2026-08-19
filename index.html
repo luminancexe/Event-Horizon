@@ -213,10 +213,20 @@
     <div class="panel-head"><span id="placement-title">PLACING OBJECT</span><span class="corner"></span></div>
     <div class="placement-body">
       <label class="text-row"><span>NAME</span><input type="text" id="input-p-name" maxlength="16"></label>
+      <label class="select-row hidden" id="row-p-bhclass"><span>SINGULARITY CLASS</span>
+        <select id="select-p-bhclass">
+          <option value="supermassive">SUPERMASSIVE (1,000–20,000 M☉)</option>
+          <option value="intermediate">INTERMEDIATE (100–1,000 M☉)</option>
+          <option value="stellar">STELLAR (10–100 M☉)</option>
+          <option value="primordial">PRIMORDIAL (0.5–10 M☉)</option>
+        </select>
+      </label>
       <label class="slider-row"><span>MASS</span><span class="val" id="val-p-mass">10.0</span>
         <input type="range" id="slider-p-mass" min="0.1" max="500" step="0.1" value="10"></label>
-      <label class="slider-row"><span>SIZE</span><span class="val" id="val-p-size">1.0</span>
+      <label class="slider-row" id="row-p-size"><span>SIZE</span><span class="val" id="val-p-size">1.0</span>
         <input type="range" id="slider-p-size" min="0.2" max="4" step="0.1" value="1"></label>
+      <label class="slider-row hidden" id="row-p-spin"><span>KERR SPIN (a)</span><span class="val" id="val-p-spin">+0.85</span>
+        <input type="range" id="slider-p-spin" min="-1" max="1" step="0.05" value="0.85"></label>
       <label class="slider-row hidden" id="row-p-temp"><span>TEMPERATURE</span><span class="val" id="val-p-temp">6000</span>
         <input type="range" id="slider-p-temp" min="2500" max="30000" step="100" value="6000"></label>
       <div class="placement-hint">Click to place on a stable orbit, or click-drag to set an exact launch velocity.</div>

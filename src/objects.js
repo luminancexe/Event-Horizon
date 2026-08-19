@@ -11,6 +11,8 @@ import * as THREE from 'three';
 import {
   CONFIG,
   state,
+  C_SIM,
+  BH_MASS_CLASSES,
   BASE_HORIZON,
   BASE_BH_MASS,
   CAPTURE_MULT,
@@ -418,14 +420,130 @@ export class NeutronStar extends CelestialBody {
 }
 
 /**
- * Supermassive gravitational singularity with event horizon, photon ring, and accretion disk.
+ * Infers the closest standard black hole mass classification based on mass.
+ *
+ * @param {number} mass - Mass in solar masses (M☉).
+ * @returns {string} Classification identifier ('supermassive' | 'intermediate' | 'stellar' | 'primordial').
+ */
+export function inferBHClass(mass) {
+  if (mass >= 1000) return 'supermassive';
+  if (mass >= 100) return 'intermediate';
+  if (mass >= 10) return 'stellar';
+  return 'primordial';
+}
+
+/**
+ * Gravitational singularity with event horizon, photon ring, optional accretion disk,
+ * and Kerr-inspired spin / ergosphere parameters.
  */
 export class BlackHole extends CelestialBody {
   constructor(opts) {
     super({ ...opts, type: 'blackhole' });
+    this.bhClass = opts.bhClass || 'supermassive';
+    this.spin = THREE.MathUtils.clamp(
+      opts.spin ?? (BH_MASS_CLASSES[this.bhClass]?.defaultSpin ?? 0.85),
+      -1,
+      1
+    );
+    this.spinDirection = opts.spinDirection
+      ? (opts.spinDirection instanceof THREE.Vector3
+          ? opts.spinDirection.clone()
+          : new THREE.Vector3(opts.spinDirection.x, opts.spinDirection.y, opts.spinDirection.z)
+        ).normalize()
+      : new THREE.Vector3(0, 1, 0);
+
     this.visualRadius = opts.visualRadius;
     this.diskMat = opts.diskMat;
     this.photonSprite = opts.photonSprite;
+    this.ergosphereMesh = opts.ergosphereMesh || null;
+    this.primordialGlow = opts.primordialGlow || null;
+  }
+
+  /**
+   * Rotation model classification ('schwarzschild' for a ~ 0, 'kerr' for rotating).
+   * @returns {'schwarzschild'|'kerr'}
+   */
+  get rotationModel() {
+    return Math.abs(this.spin) < 0.001 ? 'schwarzschild' : 'kerr';
+  }
+
+  /**
+   * Relativistic Schwarzschild radius in simulation distance units:
+   *   r_s = (2 * G * M) / C_SIM^2
+   * @returns {number}
+   */
+  get schwarzschildRadius() {
+    return (2 * CONFIG.G * this.mass) / (C_SIM * C_SIM);
+  }
+
+  /**
+   * Kerr outer event horizon radius in simulation distance units:
+   *   r_H = (r_s / 2) * (1 + sqrt(1 - a^2))
+   * @returns {number}
+   */
+  get kerrHorizonRadius() {
+    const a = this.spin;
+    return (this.schwarzschildRadius / 2) * (1 + Math.sqrt(Math.max(0, 1 - a * a)));
+  }
+
+  /**
+   * Equatorial ergosphere static limit radius in simulation distance units:
+   *   r_E(pi/2) = r_s
+   * @returns {number}
+   */
+  get equatorialErgoRadius() {
+    return this.schwarzschildRadius;
+  }
+
+  /**
+   * Polar ergosphere radius in simulation distance units (coincides with Kerr horizon):
+   *   r_E(0) = r_H
+   * @returns {number}
+   */
+  get polarErgoRadius() {
+    return this.kerrHorizonRadius;
+  }
+
+  /**
+   * Simulation-scaled Kerr angular momentum:
+   *   J_sim = a * (G * M^2) / C_SIM
+   * @returns {number}
+   */
+  get angularMomentumSim() {
+    return (this.spin * CONFIG.G * this.mass * this.mass) / C_SIM;
+  }
+
+  /**
+   * Alias for angularMomentumSim.
+   * @returns {number}
+   */
+  get angularMomentum() {
+    return this.angularMomentumSim;
+  }
+
+  /**
+   * Updates ergosphere geometry scaling and spatial orientation based on current spin and spinDirection.
+   * Aligns the polar symmetry axis of the oblate spheroid with spinDirection.
+   */
+  updateErgosphere() {
+    if (!this.ergosphereMesh) return;
+    const a = this.spin;
+    const hasErgo = Math.abs(a) >= 0.05;
+    this.ergosphereMesh.visible = hasErgo;
+    if (!hasErgo) return;
+
+    const polarFrac = (1 + Math.sqrt(Math.max(0, 1 - a * a))) / 2;
+    this.ergosphereMesh.scale.set(
+      this.visualRadius,
+      this.visualRadius * polarFrac,
+      this.visualRadius
+    );
+
+    const q = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      this.spinDirection.clone().normalize()
+    );
+    this.ergosphereMesh.quaternion.copy(q);
   }
 }
 
@@ -440,8 +558,19 @@ export class BlackHole extends CelestialBody {
  * @returns {BlackHole}
  */
 export function createBlackHole(opts = {}) {
-  const mass = opts.mass ?? 5000;
-  const visualRadius = Math.max(BASE_HORIZON * Math.cbrt(mass / BASE_BH_MASS), 2.5);
+  const bhClass = opts.bhClass || (opts.mass !== undefined ? inferBHClass(opts.mass) : 'supermassive');
+  const classConfig = BH_MASS_CLASSES[bhClass] || BH_MASS_CLASSES.supermassive;
+  const mass = opts.mass ?? classConfig.defaultMass;
+  const spin = opts.spin !== undefined ? THREE.MathUtils.clamp(opts.spin, -1, 1) : classConfig.defaultSpin;
+  const spinDirection = (
+    opts.spinDirection instanceof THREE.Vector3
+      ? opts.spinDirection.clone()
+      : opts.spinDirection
+      ? new THREE.Vector3(opts.spinDirection.x, opts.spinDirection.y, opts.spinDirection.z)
+      : new THREE.Vector3(0, 1, 0)
+  ).normalize();
+
+  const visualRadius = Math.max(BASE_HORIZON * Math.cbrt(mass / BASE_BH_MASS), 1.6);
   const group = new THREE.Group();
 
   // Dark spherical event horizon
@@ -459,25 +588,61 @@ export function createBlackHole(opts = {}) {
   shadowSprite.scale.set(visualRadius * 4.2, visualRadius * 4.2, 1);
   group.add(shadowSprite);
 
-  // Relativistic photon sphere ring
-  const photonTex = makeRingTexture('rgba(255,244,214,0.95)');
-  const photonSprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      map: photonTex,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    })
-  );
-  photonSprite.scale.set(visualRadius * 2.5, visualRadius * 2.5, 1);
-  group.add(photonSprite);
+  // Relativistic photon sphere ring (omitted or compact on primordial)
+  let photonSprite = null;
+  if (bhClass !== 'primordial') {
+    const photonTex = makeRingTexture('rgba(255,244,214,0.95)');
+    photonSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: photonTex,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    photonSprite.scale.set(visualRadius * 2.5, visualRadius * 2.5, 1);
+    group.add(photonSprite);
+  }
 
-  // Planar turbulent accretion disk
-  const diskMat = createDiskMaterial(CONFIG.diskBrightness);
-  const diskGeo = new THREE.RingGeometry(visualRadius * 1.2, visualRadius * 6.5, 256, 16);
-  const diskMesh = new THREE.Mesh(diskGeo, diskMat);
-  diskMesh.rotation.x = -Math.PI / 2;
-  group.add(diskMesh);
+  // Primordial high-energy evaporation micro-glow
+  let primordialGlow = null;
+  if (bhClass === 'primordial') {
+    const pTex = makeGlowTexture('rgba(160,90,255,0.95)', 'rgba(0,210,255,0)');
+    primordialGlow = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: pTex,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      })
+    );
+    primordialGlow.scale.set(visualRadius * 4.0, visualRadius * 4.0, 1);
+    group.add(primordialGlow);
+  }
+
+  // Planar turbulent accretion disk (scaled by classification)
+  let diskMat = null;
+  let diskMesh = null;
+  if (classConfig.hasDisk && opts.hasDisk !== false) {
+    const diskScale = opts.diskScale ?? classConfig.diskScale;
+    diskMat = createDiskMaterial(CONFIG.diskBrightness);
+    const diskGeo = new THREE.RingGeometry(visualRadius * 1.2, visualRadius * diskScale, 256, 16);
+    diskMesh = new THREE.Mesh(diskGeo, diskMat);
+    diskMesh.rotation.x = -Math.PI / 2;
+    group.add(diskMesh);
+  }
+
+  // Oblate Ergosphere wireframe visualization for rotating singularities
+  const ergoGeo = new THREE.SphereGeometry(1, 32, 24);
+  const ergoMat = new THREE.MeshBasicMaterial({
+    color: 0x00e5ff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.16,
+    depthWrite: false,
+  });
+  const ergosphereMesh = new THREE.Mesh(ergoGeo, ergoMat);
+  group.add(ergosphereMesh);
 
   const pos = opts.position || new THREE.Vector3();
   group.position.copy(pos);
@@ -489,12 +654,19 @@ export function createBlackHole(opts = {}) {
     core: horizonMesh,
     diskMat,
     photonSprite,
+    ergosphereMesh,
+    primordialGlow,
     visualRadius,
     mass,
     radius: visualRadius,
     velocity: opts.velocity,
+    bhClass,
+    spin,
+    spinDirection,
     trail: createTrail(0x554466, 0.2),
   });
+
+  obj.updateErgosphere();
 
   state.bodies.push(obj);
   registerSelectable(horizonMesh, obj);

@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three';
-import { CONFIG, state } from './state.js';
+import { CONFIG, state, C_SIM, BH_MASS_CLASSES } from './state.js';
 import { scene, camera } from './scene.js';
 import { selectionRingTex } from './textures.js';
 import { findDominantAttractor, nearestBlackHole, bhRadii } from './objects.js';
@@ -330,20 +330,29 @@ export function updateInfoPanel() {
   const $ = (id) => document.getElementById(id);
 
   if (selected.type === 'blackhole') {
-    $('info-name').textContent = selected.name;
-    $('info-type').textContent = 'SUPERMASSIVE SINGULARITY';
+    const bh = selected;
+    const classLabel = (BH_MASS_CLASSES[bh.bhClass]?.label || 'BLACK HOLE SINGULARITY').toUpperCase();
+    const spinVal = bh.spin ?? 0;
+    const spinStr =
+      Math.abs(spinVal) < 0.001
+        ? 'SCHWARZSCHILD (a = 0.00)'
+        : `KERR (a = ${spinVal >= 0 ? '+' : ''}${spinVal.toFixed(2)} ${spinVal >= 0 ? 'PROGRADE' : 'RETROGRADE'})`;
+
+    $('info-name').textContent = bh.name;
+    $('info-type').textContent = classLabel;
     $('info-parent').textContent = '—';
-    $('info-mass').textContent = selected.mass.toFixed(0) + ' M☉';
-    $('info-distance').textContent = (selected.mesh.position.length() / 10).toFixed(2) + ' AU';
-    $('info-velocity').textContent = (selected.velocity.length() / 60).toFixed(2) + 'c';
-    $('info-orbit').textContent = '—';
-    $('info-temp').textContent = '—';
-    $('info-age').textContent = Math.floor(selected.age).toLocaleString() + ' yrs';
-    $('info-lifecycle').textContent = '—';
+    $('info-mass').textContent = bh.mass.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' M☉';
+    $('info-distance').textContent = (bh.mesh.position.length() / 10).toFixed(2) + ' AU';
+    $('info-velocity').textContent = (bh.velocity.length() / C_SIM).toFixed(2) + 'c';
+    $('info-orbit').textContent = spinStr;
+    $('info-temp').textContent =
+      bh.bhClass === 'primordial' ? 'HAWKING EMISSION' : bh.diskMat ? 'ACCRETION HEATED' : 'INACTIVE';
+    $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';
+    $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU`;
     $('info-tidal').textContent = 'EXTREME';
-    $('info-influence').textContent = 'SYSTEM-WIDE';
-    $('info-status').textContent = 'STABLE';
-    positionSelectionVisuals(selected.mesh.position, selected.velocity, selected.visualRadius * 2.6, null);
+    $('info-influence').textContent = bh.bhClass === 'supermassive' ? 'GALACTIC CORE' : 'LOCAL SYSTEM';
+    $('info-status').textContent = bh.rotationModel === 'kerr' ? 'ROTATING (KERR)' : 'STATIC (SCHWARZSCHILD)';
+    positionSelectionVisuals(bh.mesh.position, bh.velocity, bh.visualRadius * 2.6, null);
     return;
   }
 

@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three';
-import { CONFIG, state, VELOCITY_DRAG_SCALE } from './state.js';
+import { CONFIG, state, VELOCITY_DRAG_SCALE, BH_MASS_CLASSES } from './state.js';
 import { scene, camera, controls, renderer } from './scene.js';
 import { raycaster, pointerNDC, handleClick, fillPredictedPath } from './selection.js';
 import {
@@ -230,7 +230,36 @@ function startPlacement(type) {
   document.getElementById('placement-title').textContent =
     'PLACING ' + type.toUpperCase() + (parentBody ? ` (ORBITS ${parentBody.name})` : '');
   document.getElementById('input-p-name').value = randomName(type);
+
+  const isBH = type === 'blackhole';
+  document.getElementById('row-p-bhclass').classList.toggle('hidden', !isBH);
+  document.getElementById('row-p-spin').classList.toggle('hidden', !isBH);
+  document.getElementById('row-p-size').classList.toggle('hidden', isBH);
   document.getElementById('row-p-temp').classList.toggle('hidden', type !== 'star');
+
+  const massSlider = document.getElementById('slider-p-mass');
+  const massVal = document.getElementById('val-p-mass');
+  if (isBH) {
+    const cls = document.getElementById('select-p-bhclass').value || 'supermassive';
+    const cfg = BH_MASS_CLASSES[cls] || BH_MASS_CLASSES.supermassive;
+    massSlider.min = cfg.massRange[0];
+    massSlider.max = cfg.massRange[1];
+    massSlider.step = cfg.massRange[0] < 1 ? '0.1' : (cfg.massRange[1] > 1000 ? '50' : '1');
+    massSlider.value = cfg.defaultMass;
+    massVal.textContent = cfg.defaultMass.toFixed(1);
+
+    const spinSlider = document.getElementById('slider-p-spin');
+    spinSlider.value = cfg.defaultSpin;
+    document.getElementById('val-p-spin').textContent =
+      (cfg.defaultSpin >= 0 ? '+' : '') + cfg.defaultSpin.toFixed(2);
+  } else {
+    massSlider.min = '0.1';
+    massSlider.max = '500';
+    massSlider.step = '0.1';
+    massSlider.value = '10';
+    massVal.textContent = '10.0';
+  }
+
   placementPanel.classList.remove('hidden');
   getGhostMarker().visible = true;
 }
@@ -251,6 +280,27 @@ document.getElementById('btn-p-cancel').addEventListener('click', cancelPlacemen
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.placement) cancelPlacement();
 });
+
+const bhClassSelect = document.getElementById('select-p-bhclass');
+if (bhClassSelect) {
+  bhClassSelect.addEventListener('change', () => {
+    if (!state.placement || state.placement.type !== 'blackhole') return;
+    const cls = bhClassSelect.value;
+    const cfg = BH_MASS_CLASSES[cls];
+    if (!cfg) return;
+    const massSlider = document.getElementById('slider-p-mass');
+    massSlider.min = cfg.massRange[0];
+    massSlider.max = cfg.massRange[1];
+    massSlider.step = cfg.massRange[0] < 1 ? '0.1' : (cfg.massRange[1] > 1000 ? '50' : '1');
+    massSlider.value = cfg.defaultMass;
+    document.getElementById('val-p-mass').textContent = cfg.defaultMass.toFixed(1);
+
+    const spinSlider = document.getElementById('slider-p-spin');
+    spinSlider.value = cfg.defaultSpin;
+    document.getElementById('val-p-spin').textContent =
+      (cfg.defaultSpin >= 0 ? '+' : '') + cfg.defaultSpin.toFixed(2);
+  });
+}
 
 /**
  * Updates placement visuals while moving or dragging across the viewport.
@@ -319,6 +369,8 @@ function endPlacementDrag(p) {
   const mass = +document.getElementById('slider-p-mass').value;
   const size = +document.getElementById('slider-p-size').value;
   const tempK = +document.getElementById('slider-p-temp').value;
+  const bhClass = document.getElementById('select-p-bhclass')?.value || 'supermassive';
+  const spin = +document.getElementById('slider-p-spin')?.value || 0;
 
   let velocity;
   if (state.placement.type === 'moon') {
@@ -343,6 +395,8 @@ function endPlacementDrag(p) {
     mass,
     size,
     tempK,
+    bhClass,
+    spin,
     parentBody: state.placement.parentBody,
   });
 
@@ -397,8 +451,11 @@ function spawnFromPlacement(type, pos, vel, props) {
       createBlackHole({
         position: pos,
         velocity: vel,
-        mass: Math.max(props.mass * 30, 400),
+        mass: props.mass,
         name: props.name,
+        bhClass: props.bhClass || 'supermassive',
+        spin: props.spin !== undefined ? props.spin : 0.85,
+        spinDirection: new THREE.Vector3(0, (props.spin ?? 0) >= 0 ? 1 : -1, 0),
       });
       break;
     case 'asteroid': {
@@ -416,11 +473,20 @@ function spawnFromPlacement(type, pos, vel, props) {
 }
 
 /* UI feedback listeners for placement slider inputs */
-['slider-p-mass', 'slider-p-size', 'slider-p-temp'].forEach((id) => {
+['slider-p-mass', 'slider-p-size', 'slider-p-temp', 'slider-p-spin'].forEach((id) => {
   const el = document.getElementById(id);
+  if (!el) return;
   const valId = 'val-' + id.replace('slider-', '');
   el.addEventListener('input', () => {
-    document.getElementById(valId).textContent =
-      id === 'slider-p-temp' ? (+el.value).toFixed(0) : (+el.value).toFixed(1);
+    const valEl = document.getElementById(valId);
+    if (!valEl) return;
+    if (id === 'slider-p-temp') {
+      valEl.textContent = (+el.value).toFixed(0);
+    } else if (id === 'slider-p-spin') {
+      const v = +el.value;
+      valEl.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
+    } else {
+      valEl.textContent = (+el.value).toFixed(1);
+    }
   });
 });
