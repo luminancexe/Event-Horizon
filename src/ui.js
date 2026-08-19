@@ -50,7 +50,14 @@ export function updateDebugHud() {
   if (elLenses) elLenses.textContent = state.activeLensesCount ?? 0;
   const elDbgTde = $('dbg-tde');
   if (elDbgTde && state.tdeManager) {
-    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)`;
+    let totalDiskMass = 0;
+    for (const b of state.bodies) {
+      if (b.type === 'blackhole' && b.diskMass > 0) {
+        totalDiskMass += b.diskMass;
+      }
+    }
+    const diskStr = totalDiskMass > 0 ? ` | M_disk: ${totalDiskMass.toFixed(1)} M☉` : '';
+    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)${diskStr}`;
   }
   $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
   $('dbg-substeps').textContent = state.lastSubsteps;

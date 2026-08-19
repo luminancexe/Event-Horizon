@@ -604,9 +604,21 @@ export class BlackHole extends CelestialBody {
     this._visualRadius = opts.visualRadius;
     this.diskMesh = opts.diskMesh || null;
     this.diskMat = opts.diskMat || null;
+    this.diskMass = opts.diskMass ?? 0;
     this.photonSprite = opts.photonSprite;
     this.ergosphereMesh = opts.ergosphereMesh || null;
     this.primordialGlow = opts.primordialGlow || null;
+  }
+
+  /**
+   * Derived viscous accretion rate from disk mass reservoir into singularity (M☉/s):
+   *   M_dot_acc = diskMass / tau_visc
+   * @returns {number}
+   */
+  get accretionRate() {
+    const tau = CONFIG.tdeViscousTimescale || 6.0;
+    if (this.diskMass <= 0 || tau <= 0) return 0;
+    return this.diskMass / tau;
   }
 
   /**
@@ -847,6 +859,7 @@ export function createBlackHole(opts = {}) {
     core: horizonMesh,
     diskMesh,
     diskMat,
+    diskMass: opts.diskMass ?? 0,
     photonSprite,
     ergosphereMesh,
     primordialGlow,

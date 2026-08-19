@@ -22,6 +22,8 @@ export const CONFIG = {
   dopplerBeamingEnabled: true,// Relativistic accretion disk Doppler beaming & gravitational redshift switch
   tidalDisruptionEnabled: true,// Relativistic continuous tidal disruption & plasma streams switch
   tdeStreamDensity: 1.0,     // Tidal disruption stream particle emission density multiplier (0.5x - 2.0x)
+  tdeViscousTimescale: 6.0,  // Viscous accretion timescale (simulation seconds) for disk -> BH mass transfer
+  tdeDiskThickness: 1.2,     // Effective accretion disk half-thickness for stream-disk swept intersection
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch
@@ -180,6 +182,8 @@ export const state = {
   fragments: [],
   tdeManager: null,
   activeTdeCount: 0,
+  tdeEjectaMass: 0,
+  tdeTotalAccretedMass: 0,
 
   // Camera animation and kinematic state
   cameraMode: 'free',

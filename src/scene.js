@@ -188,6 +188,7 @@ export function createDiskMaterial(brightness, opts = {}) {
       uMass: { value: opts.mass ?? 5000 },
       uInnerRadius: { value: opts.innerRadius ?? 10.8 },
       uDopplerEnabled: { value: CONFIG.dopplerBeamingEnabled ?? true },
+      uAccretionRate: { value: opts.accretionRate ?? 0.0 },
       uG: { value: CONFIG.G },
       uCSim: { value: C_SIM },
     },
@@ -214,6 +215,7 @@ export function createDiskMaterial(brightness, opts = {}) {
       uniform float uMass;
       uniform float uInnerRadius;
       uniform bool uDopplerEnabled;
+      uniform float uAccretionRate;
       uniform float uG;
       uniform float uCSim;
 
@@ -259,7 +261,8 @@ export function createDiskMaterial(brightness, opts = {}) {
 
         float turb = fbm(vec2(rotAngle * 2.4, radialFrac * 5.0 - uTime * 0.08 * rotDirection));
         float turb2 = fbm(vec2(rotAngle * 5.5 + 4.0, radialFrac * 9.0 + uTime * 0.05 * rotDirection));
-        float brightness = turb * 0.65 + turb2 * 0.45;
+        float accBoost = 1.0 + log(1.0 + max(uAccretionRate, 0.0) * 12.0) * 0.45;
+        float brightness = (turb * 0.65 + turb2 * 0.45) * accBoost;
 
         // Thermal blackbody color ramp: white-hot inner edge to deep red outer rim
         vec3 hot = vec3(1.0, 0.98, 0.92);

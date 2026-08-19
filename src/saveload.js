@@ -161,10 +161,12 @@ export function serializeUniverse() {
   state.bodies.forEach((b, i) => bodyIndex.set(b, i));
 
   return {
-    version: 3,
+    version: 4,
     config: { ...CONFIG },
     simTime: state.simTime,
     simYears: state.simYears,
+    tdeEjectaMass: state.tdeEjectaMass ?? 0,
+    tdeTotalAccretedMass: state.tdeTotalAccretedMass ?? 0,
     cameraMode: state.cameraMode,
     cameraPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
     cameraTarget: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
@@ -181,6 +183,7 @@ export function serializeUniverse() {
       spinDirection: b.spinDirection
         ? { x: b.spinDirection.x, y: b.spinDirection.y, z: b.spinDirection.z }
         : undefined,
+      diskMass: b.diskMass ?? 0,
       tempK: b.tempK,
       age: b.age,
       properTime: b.properTime,
@@ -224,6 +227,7 @@ function restoreBody(bd) {
     tdePhase: bd.tdePhase ?? 0,
     initialMass: bd.initialMass ?? bd.mass,
     disruptedMass: bd.disruptedMass ?? 0,
+    diskMass: bd.diskMass ?? 0,
   };
 
   let obj = null;
@@ -250,6 +254,7 @@ function restoreBody(bd) {
   obj.tdePhase = bd.tdePhase ?? 0;
   obj.initialMass = bd.initialMass ?? bd.mass;
   obj.disruptedMass = bd.disruptedMass ?? 0;
+  obj.diskMass = bd.diskMass ?? 0;
   obj._initialRadius = bd.radius;
 
   if (bd.type === 'star') {
@@ -280,6 +285,8 @@ const CONFIG_BOUNDS = {
   maxSubstep: [0.02, 0.3],
   timeScale: [0.1, 1000],
   tdeStreamDensity: [0.5, 2.0],
+  tdeViscousTimescale: [0.5, 60.0],
+  tdeDiskThickness: [0.1, 5.0],
 };
 
 /**
@@ -314,6 +321,8 @@ export function deserializeUniverse(data) {
 
   state.simTime = data.simTime || 0;
   state.simYears = data.simYears || 0;
+  state.tdeEjectaMass = data.tdeEjectaMass || 0;
+  state.tdeTotalAccretedMass = data.tdeTotalAccretedMass || 0;
 
   // Phase 1: Recreate celestial bodies (prioritizing black holes for gravitational stability)
   const rawBodies = data.bodies || [];

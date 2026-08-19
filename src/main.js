@@ -177,6 +177,7 @@ function animate() {
       updateAsteroids(subDtAst);
       updateFragments(subDtAst);
       state.tdeManager?.update(subDtAst);
+      state.tdeManager?.updateViscousAccretion(subDtAst);
       asteroidMs += performance.now() - t0;
     }
 
@@ -205,6 +206,7 @@ function animate() {
         bh.diskMat.uniforms.uTime.value += dt;
         bh._burst = Math.max(0, (bh._burst || 0) - dt * 0.7);
         bh.diskMat.uniforms.uBrightness.value = CONFIG.diskBrightness + bh._burst;
+        bh.diskMat.uniforms.uAccretionRate.value = bh.accretionRate;
         bh.diskMat.uniforms.uCameraPos.value.copy(camera.position);
         bh.diskMat.uniforms.uBHPos.value.copy(bh.mesh.position);
         bh.diskMat.uniforms.uSpinAxis.value.copy(bh.spinDirection);

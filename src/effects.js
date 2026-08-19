@@ -232,6 +232,8 @@ const _scratchTdeColor = new THREE.Color();
 const _scratchTdeDummy = new THREE.Object3D();
 const _scratchColorLead = new THREE.Color();
 const _scratchColorTrail = new THREE.Color();
+const _scratchDiskNormal = new THREE.Vector3();
+const _scratchDiskRel = new THREE.Vector3();
 
 /**
  * High-performance GPU-instanced stream manager for continuous relativistic
@@ -242,7 +244,9 @@ const _scratchColorTrail = new THREE.Color();
  * 2. Deterministic FIFO ring-buffer recycling upon pool exhaustion (zero runtime allocations).
  * 3. Symplectic multi-black-hole gravitational and Lense-Thirring integration.
  * 4. Relativistic proper time rate (dTau/dt) governing particle aging and thermal cooling.
- * 5. Single-transfer atomic mass accretion to singularities + accretion flaring.
+ * 5. Swept disk-plane intersection and circularization with atomic mass transfer to disk reservoir.
+ * 6. Single-transfer atomic mass accretion to singularities + accretion flaring.
+ * 7. Ejecta mass tracking for uncaptured particles to maintain 5-component conservation.
  */
 export class TDEStreamManager {
   constructor() {
@@ -256,6 +260,7 @@ export class TDEStreamManager {
     this.pMasses = new Float32Array(this.capacity);
     this.pAlive = new Uint8Array(this.capacity);
     this.pBHIndex = new Int32Array(this.capacity);
+    this.pPrevH = new Float32Array(this.capacity);
 
     this.activeCount = 0;
     this.nextRecycleIdx = 0;
@@ -303,19 +308,24 @@ export class TDEStreamManager {
   allocateSlot() {
     // 1. Search for dead slot
     for (let i = 0; i < this.capacity; i++) {
-      if (this.pAlive[i] === 0) return i;
+      if (this.pAlive[i] === 0) {
+        this.pPrevH[i] = 0;
+        return i;
+      }
     }
     // 2. Search for faded particle
     for (let i = 0; i < this.capacity; i++) {
       const idx = (this.nextRecycleIdx + i) % this.capacity;
       if (this.pAges[idx] / Math.max(this.pMaxLifes[idx], 0.001) > 0.85) {
         this.nextRecycleIdx = (idx + 1) % this.capacity;
+        this.pPrevH[idx] = 0;
         return idx;
       }
     }
     // 3. FIFO recycling
     const idx = this.nextRecycleIdx;
     this.nextRecycleIdx = (this.nextRecycleIdx + 1) % this.capacity;
+    this.pPrevH[idx] = 0;
     return idx;
   }
 
@@ -377,6 +387,8 @@ export class TDEStreamManager {
     _scratchColorLead.setHex(baseColorHex);
     _scratchColorTrail.setHex(baseColorHex);
 
+    _scratchDiskNormal.copy(bh.spinDirection || _scratchNormalY).normalize();
+
     // Spawn Leading Packet
     const iLead = this.allocateSlot();
     this.pPositions[iLead * 3] = _scratchTdeLeadPos.x;
@@ -394,6 +406,8 @@ export class TDEStreamManager {
     this.pMasses[iLead] = massPerParticle;
     this.pAlive[iLead] = 1;
     this.pBHIndex[iLead] = bh.id;
+    _scratchDiskRel.subVectors(_scratchTdeLeadPos, pBH);
+    this.pPrevH[iLead] = _scratchDiskRel.dot(_scratchDiskNormal);
 
     // Spawn Trailing Packet
     const iTrail = this.allocateSlot();
@@ -412,6 +426,8 @@ export class TDEStreamManager {
     this.pMasses[iTrail] = massPerParticle;
     this.pAlive[iTrail] = 1;
     this.pBHIndex[iTrail] = bh.id;
+    _scratchDiskRel.subVectors(_scratchTdeTrailPos, pBH);
+    this.pPrevH[iTrail] = _scratchDiskRel.dot(_scratchDiskNormal);
   }
 
   /**
@@ -433,6 +449,8 @@ export class TDEStreamManager {
 
   /**
    * Advances all active stream particles over timestep dt.
+   * Handles multi-singularity gravity, proper time aging, swept disk intersection,
+   * atomic disk mass transfer, horizon capture, and ejecta tracking.
    *
    * @param {number} dt - Timestep in simulation seconds.
    */
@@ -455,26 +473,19 @@ export class TDEStreamManager {
       const properTimeRate = computeTimeDilation(_scratchTdePos, _scratchTdeVel, null);
       this.pAges[i] += dt * Math.max(properTimeRate, 0.001);
 
-      if (this.pAges[i] >= this.pMaxLifes[i]) {
-        this.pAlive[i] = 0;
-        _scratchTdeDummy.position.set(0, -99999, 0);
-        _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
-        _scratchTdeDummy.updateMatrix();
-        this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
-        matrixNeedsUpdate = true;
-        continue;
-      }
-
-      // Check horizon capture against all active black holes
+      // 1. Check horizon capture against all active black holes
       let captured = false;
       for (const bh of bhs) {
         const dist = _scratchTdePos.distanceTo(bh.mesh.position);
         const radii = bhRadii(bh);
         if (dist < radii.capture) {
-          // Atomic single-transfer accretion
+          // Atomic direct horizon accretion
           this.pAlive[i] = 0;
-          bh.mass += this.pMasses[i];
-          triggerDiskBurst(bh, 0.04 + this.pMasses[i] * 0.02);
+          const dm = this.pMasses[i];
+          this.pMasses[i] = 0;
+          bh.mass += dm;
+          state.tdeTotalAccretedMass = (state.tdeTotalAccretedMass || 0) + dm;
+          triggerDiskBurst(bh, 0.04 + dm * 0.02);
           _scratchTdeDummy.position.set(0, -99999, 0);
           _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
           _scratchTdeDummy.updateMatrix();
@@ -486,7 +497,68 @@ export class TDEStreamManager {
       }
       if (captured) continue;
 
-      // Gravitational acceleration (Newtonian direct-sum + Lense-Thirring)
+      // 2. Check swept accretion disk plane intersection & circularization
+      let targetBh = null;
+      for (const b of bhs) {
+        if (b.id === this.pBHIndex[i]) {
+          targetBh = b;
+          break;
+        }
+      }
+      if (!targetBh && bhs.length > 0) targetBh = bhs[0];
+
+      if (targetBh && targetBh.spinDirection && targetBh.diskMesh) {
+        _scratchDiskNormal.copy(targetBh.spinDirection).normalize();
+        _scratchDiskRel.subVectors(_scratchTdePos, targetBh.mesh.position);
+        const hCurr = _scratchDiskRel.dot(_scratchDiskNormal);
+        const hPrev = this.pPrevH[i];
+        const hThick = CONFIG.tdeDiskThickness || 1.2;
+        const rPlaneSq = Math.max(0, _scratchDiskRel.lengthSq() - hCurr * hCurr);
+        const rPlane = Math.sqrt(rPlaneSq);
+
+        const radii = bhRadii(targetBh);
+        const iscoNorm = radii.schwarzschild > 0 ? targetBh.iscoRadius / (3 * radii.schwarzschild) : 1.0;
+        const rInner = targetBh.visualRadius * (1.0 + 0.20 * iscoNorm);
+        const rOuter = targetBh.visualRadius * (targetBh.diskScale || 6.5);
+
+        // Swept crossing test across disk plane within disk radial annulus
+        const sweptCrossing =
+          (hPrev * hCurr <= 0 && (Math.abs(hPrev) > 0.0001 || Math.abs(hCurr) > 0.0001)) ||
+          Math.abs(hCurr) <= hThick;
+
+        if (sweptCrossing && rPlane >= rInner && rPlane <= rOuter) {
+          // Stream -> Disk atomic transfer with shock dissipation
+          this.pAlive[i] = 0;
+          const dm = this.pMasses[i];
+          this.pMasses[i] = 0;
+          targetBh.diskMass = (targetBh.diskMass || 0) + dm;
+          triggerDiskBurst(targetBh, 0.08 + dm * 0.05);
+
+          _scratchTdeDummy.position.set(0, -99999, 0);
+          _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+          _scratchTdeDummy.updateMatrix();
+          this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+          matrixNeedsUpdate = true;
+          continue;
+        }
+        this.pPrevH[i] = hCurr;
+      }
+
+      // 3. Check expiration / ejecta escape
+      if (this.pAges[i] >= this.pMaxLifes[i]) {
+        this.pAlive[i] = 0;
+        const dm = this.pMasses[i];
+        this.pMasses[i] = 0;
+        state.tdeEjectaMass = (state.tdeEjectaMass || 0) + dm;
+        _scratchTdeDummy.position.set(0, -99999, 0);
+        _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+        _scratchTdeDummy.updateMatrix();
+        this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+        matrixNeedsUpdate = true;
+        continue;
+      }
+
+      // 4. Gravitational acceleration (Newtonian direct-sum + Lense-Thirring)
       computeTotalAcceleration(_scratchTdePos, _scratchTdeVel, null, state.bodies, _scratchTdeAcc);
 
       // Symplectic velocity & position integration
@@ -550,11 +622,34 @@ export class TDEStreamManager {
   }
 
   /**
+   * Advances viscous accretion flow from disk reservoirs into black hole singularities.
+   *
+   * @param {number} dt - Timestep in simulation seconds.
+   */
+  updateViscousAccretion(dt) {
+    const bhs = blackHoles();
+    for (const bh of bhs) {
+      if (bh.diskMass > 0) {
+        const tau = CONFIG.tdeViscousTimescale || 6.0;
+        const mDot = tau > 0 ? bh.diskMass / tau : 0;
+        const dM = Math.min(bh.diskMass, mDot * dt);
+        if (dM > 0) {
+          bh.diskMass = Math.max(0, bh.diskMass - dM);
+          bh.mass += dM;
+          state.tdeTotalAccretedMass = (state.tdeTotalAccretedMass || 0) + dM;
+        }
+      }
+    }
+  }
+
+  /**
    * Resets all particle states and clears instances.
    */
   clear() {
     this.pAlive.fill(0);
     this.pAges.fill(0);
+    this.pMasses.fill(0);
+    this.pPrevH.fill(0);
     this.activeCount = 0;
     _scratchTdeDummy.position.set(0, -99999, 0);
     _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);

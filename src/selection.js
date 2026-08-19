@@ -366,11 +366,13 @@ export function updateInfoPanel() {
       bh.bhClass === 'primordial'
         ? 'HAWKING EMISSION'
         : bh.diskMat
-        ? (CONFIG.dopplerBeamingEnabled ? `ACCRETION | DOPPLER i=${inclinationDeg.toFixed(0)}\u00b0` : 'ACCRETION (DOPPLER OFF)')
+        ? (bh.diskMass > 0
+            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | Ṁ: ${bh.accretionRate.toFixed(2)} M☉/s)`
+            : (CONFIG.dopplerBeamingEnabled ? `ACCRETION | DOPPLER i=${inclinationDeg.toFixed(0)}\u00b0` : 'ACCRETION (DOPPLER OFF)'))
         : 'INACTIVE';
     $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';
     const iscoAu = (bh.iscoRadius / 10).toFixed(2);
-    $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU | ISCO: ${iscoAu} AU`;
+    $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU | ISCO: ${iscoAu} AU | M_disk: ${(bh.diskMass || 0).toFixed(2)} M☉`;
     $('info-tidal').textContent = 'EXTREME';
     $('info-influence').textContent = bh.angularMomentumSim !== undefined
       ? `J: ${Math.abs(bh.angularMomentumSim).toExponential(2)} | \u03b8_E: ${thetaDeg.toFixed(2)}\u00b0`
