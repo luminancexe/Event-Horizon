@@ -1,129 +1,126 @@
 # Event Horizon // Gravitational Observatory
 
-A full interactive gravitational sandbox built with **Three.js**: a real N-body physics simulation, not an animation. Black holes, stars, planets, moons, comets, and asteroid fields all pull on each other under Newtonian gravity; orbits, slingshots, tidal destruction, supernovae, and black hole mergers all emerge from that gravity rather than being scripted.
+An interactive gravitational astrophysics sandbox built with **Three.js** and WebGL. Rather than scripted animations, **Event Horizon** simulates direct-sum N-body Newtonian gravitation with Plummer softening and symplectic second-order **Velocity Verlet** integration. Orbits, relativistic slingshots, tidal disruptions, accretion flares, stellar evolution, supernovae, and binary black hole mergers emerge dynamically from the underlying physics.
 
 ---
 
-## Running it
+## Getting Started
 
-No build step, no install. Open `index.html` in a modern desktop or mobile browser (Chrome, Firefox, Safari, Edge). Three.js and its addons load from a CDN via an import map, so an internet connection is required.
+No build tools, bundlers, or package installation steps are required. Open `index.html` in any modern desktop or mobile browser (Chrome, Firefox, Safari, Edge). Three.js and post-processing modules load via an ES Module Import Map from CDN.
 
-The project is a set of ES modules — keep the folder structure intact:
+### Recommended Local Server
+
+Because browser security policies isolate `localStorage` by origin, running from a local HTTP server ensures persistent Save/Load functionality across sessions:
+
+```bash
+# Python 3
+python -m http.server 8000
+
+# Node.js / npx
+npx serve .
+```
+
+*Note: The **Export Data (.json)** feature functions in all environments, including direct `file://` execution.*
+
+---
+
+## Directory Structure
 
 ```
 Event Horizon/
-├── index.html
+├── index.html          Observatory HTML5 layout, UI panels, canvas, and import maps
+├── README.md           Technical documentation and user guide
 ├── css/
-│   └── style.css
+│   └── style.css       Design tokens, responsive grid/flex layout, and UI themes
 └── src/
-    ├── main.js          entry point: initial population + the animation loop
-    ├── state.js         CONFIG + all shared mutable state
-    ├── scene.js         renderer, camera, lights, composer, accretion-disk shader
-    ├── camera.js        camera modes, smooth "fly to" transitions, screen shake
-    ├── objects.js       CelestialBody class hierarchy + factories + trails
-    ├── asteroids.js     the instanced asteroid field
-    ├── physics.js       N-body gravity, Velocity Verlet integration, collisions
-    ├── effects.js       disk bursts, fragments, star lifecycle, supernovae
-    ├── selection.js     raycasting, selection, the info panel
-    ├── creation.js      context menu + click-drag object placement
-    ├── events.js        the event log / timeline + toast banners
-    ├── ui.js            debug HUD, overlays, object browser, control-deck wiring
-    └── saveload.js      generate/save/load/export a universe
+    ├── main.js         Application bootstrap, initial population, and animation loop
+    ├── state.js        Global simulation parameters (CONFIG), constants, and shared state
+    ├── scene.js        Three.js WebGL renderer, perspective camera, lights, and shaders
+    ├── camera.js       Camera tracking modes (free/follow/orbit), tweens, and camera shake
+    ├── objects.js      CelestialBody class hierarchy, factories, and orbital trail buffers
+    ├── asteroids.js    Instanced asteroid particle field, spatial hashing, and collisions
+    ├── physics.js      N-body gravity, Velocity Verlet integrator, and celestial collisions
+    ├── effects.js      Accretion disk reactivity, tidal fragments, and supernova lifecycles
+    ├── selection.js    Raycasting selection, Hill sphere calculations, and inspector telemetry
+    ├── creation.js     Pointer interaction, drag-to-aim launch vectors, and context menus
+    ├── events.js       Chronological event logging with coordinate jump links and toasts
+    ├── ui.js           Physics telemetry HUD, debug overlays, and object browser tree
+    ├── textures.js     Procedural canvas texture generators for glows and rings
+    └── saveload.js     Version 3 state serialization, two-phase loading, and universe generation
 ```
-
-`index.html` loads `src/main.js` as a module; everything else is pulled in via `import`. Because `localStorage` is scoped per-origin, Save/Load is most reliable when served from a local server (`python3 -m http.server`, VS Code's Live Server, etc.) rather than opened directly as a `file://` URL — Export-to-file works either way.
 
 ---
 
-## Controls
+## Observatory Controls
 
 | Input | Action |
 |---|---|
-| Drag | Orbit the camera |
-| Scroll / pinch | Zoom |
-| Click / tap an object | Select it — shows a glowing ring, velocity vector, predicted trajectory, and sphere of influence |
-| Click / tap empty space | Deselect |
-| Right-click empty space, or **Create Object** | Open the spawn menu (Star / Planet / Moon / Asteroid / Comet / Black Hole) |
-| Long-press empty space (touch) | Same spawn menu, for mobile |
-| While placing an object | **Click** for an automatic stable orbit, or **click-drag** to aim and set an exact launch velocity — a live predicted path is shown while you drag |
+| **Left Click + Drag** | Orbit the observation camera |
+| **Scroll / Pinch** | Smooth zoom in / out |
+| **Click / Tap Object** | Focus and select (displays focus ring, velocity vector, predicted trajectory, and Hill sphere) |
+| **Click / Tap Empty Space** | Clear selection and return to global context |
+| **Right-Click / Long-Press** | Open radial creation context menu (*Star, Planet, Moon, Asteroid, Comet, Black Hole*) |
+| **Placement Drag** | **Click** for an automated circular Keplerian orbit, or **click-drag** to aim and set an exact launch velocity with real-time trajectory prediction |
 
-**Control Deck** (left panel):
-- **Time**: pause, or run from 0.1x to 1000x; a `SIMULATION TIME` readout tracks elapsed in-universe years
-- **Gravity**: black hole mass, the gravitational constant `G`, and a gravity on/off toggle for A/B testing
-- **Physics**: a timestep/sub-step-size slider — controls integration accuracy independently of simulation speed (smaller = more accurate and stable at high time-scales, more CPU cost)
-- **Field**: asteroid count, disk brightness, lensing strength, a trails on/off toggle, and a trail-length slider (live-resizes every existing trail, not just new ones)
-- **Camera**: Follow / Auto-Orbit toggle for the selected object, and a Black Hole View button with a smooth flight instead of a snap-cut
-- **Create**: opens the same spawn menu as right-click
-- **Universe**: Generate New Universe (fully random system), Save / Load (browser storage), Export (.json download)
+### Control Deck (Left Dock)
 
-Hovering any less-obvious control shows a short tooltip explaining what it does.
+* **Time**: Pause or accelerate simulation time from `0.1x` to `1000x`. An in-universe mission clock tracks elapsed astronomical centuries and years.
+* **Gravity**: Real-time tuning of primary singularity mass, universal gravitational constant $G$, and a master gravity toggle for performance A/B comparison.
+* **Physics**: Sub-step timestep slider ($\Delta t$) controlling numerical integration granularity independent of simulation playback speed.
+* **Field**: Asteroid field particle count, accretion disk shader brightness, gravitational lensing refraction strength, orbital trail visibility, and trail buffer length.
+* **Camera**: Switch between **Free**, **Follow**, and **Auto-Orbit** tracking modes, or trigger smooth orbital focus transitions (**Black Hole View** / **Enter Star System**).
+* **Universe Management**: **Generate New Universe** (randomized procedural system), **Save / Load** (browser `localStorage`), and **Export Data** (`.json` file download).
 
-**Right panel**: a collapsible **Object Browser** (click any body to select + fly to it), the selected object's live telemetry, and the **Event Log** — a clickable timeline where anything marked with `↗` jumps the camera to where it happened.
+### Inspector & Telemetry (Right Dock)
 
-A `⚙` icon in the top bar opens the **Physics Debug HUD**: FPS, physics-step timing, object/asteroid counts, gravity-calculation count, and — for the selected object — velocity, acceleration, kinetic and potential energy. It also has six independent overlay toggles: velocity vectors, force vectors, acceleration vectors, orbital paths, center of mass, and collision radii.
-
----
-
-## What's simulated
-
-- **N-body gravity** — every star, planet, moon, comet, and black hole attracts every other one (`F = G·M·m / r²`); asteroids feel all of them as test particles. Nested orbits (moon → planet → star → black hole) emerge naturally from mass and distance, not from parent-child scripting.
-- **Velocity Verlet integration** — position and velocity are integrated together across all bodies each sub-step (move using current acceleration, recompute acceleration at the new position, then average old/new acceleration into the velocity update), which conserves orbital energy far better than a naive Euler step, especially at high time-acceleration.
-- **Sub-stepping for stability** — large simulated steps (from high time-scale) are automatically split into smaller bounded sub-steps so fast objects can't tunnel through a black hole's capture radius or blow up numerically.
-- **Tidal destruction** — objects that stray too close to a black hole stretch, destabilize, and then gradually disintegrate into fragments that spiral in and flare the accretion disk, rather than simply vanishing.
-- **Body-body collisions** — any two non-black-hole bodies that touch either merge (slow encounter — mass/momentum conserved, radius combines by volume) or shatter into a scattered debris field of new asteroids (fast encounter), with a spawn-grace period so a moon placed deliberately close to its planet doesn't instantly get eaten by its own creation.
-- **Star lifecycle** — stars age, swell into red giants/supergiants partway through their (mass-dependent) lifespan, then either fade to a white dwarf or go supernova — collapsing into a neutron star or, for the most massive stars, a brand new black hole that immediately rejoins the simulation.
-- **Black hole mergers** — two black holes that drift close enough decay out of their mutual orbit and merge into one larger one, with a rippling multi-ring "gravitational wave" effect.
-- **Gravitational slingshots** — fast flybys that curve around a black hole and pull away are detected and logged; nothing prevents you from engineering one deliberately via the drag-to-launch tool.
-- **Accretion disk** — a custom GLSL shader renders turbulent, differentially-rotating (faster near the center) plasma, and reactively brightens/pulses whenever something is consumed.
-- **Gravitational lensing** — a post-processing pass warps the background starfield around each black hole's screen position.
-- **Automatic performance scaling** — if the frame rate stays low for a sustained stretch, the asteroid field is quietly thinned once (and only once) rather than left to keep bogging down.
-- **Velocity-scaled trails** — every trail's brightness and visible length track the object's current speed, so a fast slingshot streaks while a slow drift barely leaves a mark; independently toggleable and length-adjustable from the FIELD section.
-
-This is a *stylized*, not scientifically rigorous, simulation — some effects (star lifespans compressed to be watchable, "c" velocity readouts, the artificial inspiral drag near a black hole) are dramatized for pacing and visual clarity rather than strict general relativity.
+* **Hierarchical Breadcrumb**: Centered navigational bar displaying orbital lineage (e.g. `UNIVERSE › SAGITTARIUS PRIME › SOL › TERRA › LUNA`).
+* **Object Browser**: Categorized tree listing active celestial bodies with one-click camera focus framing.
+* **Celestial Telemetry Panel**: Live physical metrics including velocity ($c$), orbital period ($T$), surface temperature ($K$), age, evolutionary lifecycle stage, tidal stress percentage, and Hill sphere radius ($r_H$).
+* **Event Log**: Chronological timeline of astronomical events. Entries tagged with $\nearrow$ are interactive and jump the camera directly to the event coordinates.
+* **Physics Debug HUD** (`⚙` icon): Displays real-time FPS, sub-step counts, sub-millisecond execution times (gravity, collisions, asteroid field), total gravity evaluations per frame, and kinetic/potential orbital energy profiles ($E_k$, $U$). Includes vector overlays for velocity, net force, acceleration, center of mass, and collision boundaries.
 
 ---
 
-## Customizing
+## Physical Simulation Engine
 
-Shared config and tunable constants live in `src/state.js`:
-
-```js
-export const CONFIG = {
-  G: 0.6, blackHoleMass: 5000, timeScale: 1,
-  asteroidCount: 400, diskBrightness: 1.0, lensStrength: 1.0,
-  gravityEnabled: true, debugMode: false,
-  trailsEnabled: true, trailLength: 140,   // trail visibility + point history length
-  maxSubstep: 0.12,                        // physics timestep/tick-rate, independent of timeScale
-  ...
-};
-
-export const BASE_HORIZON = 9;        // visual size of a reference-mass black hole
-export const CAPTURE_MULT = 1.15;     // → capture radius
-export const TIDAL_MULT   = 4.2;      // → tidal-stress radius
-export const DRAG_MULT    = 7.5;      // → orbital-decay radius
-export const ESCAPE_R     = 480;
-export const COLLISION_MERGE_SPEED = 12;  // below this relative speed, colliding bodies merge; above, they shatter
-export const MAX_SUBSTEPS_BODY = 40;      // hard ceiling on sub-steps per frame, regardless of maxSubstep
-```
-
-Every field on `CONFIG` is saved and restored by Save/Load automatically (it's serialized as a whole object, not a hand-picked subset) — the same is true of camera mode/position/target and whichever object was selected, so reloading a save puts you back exactly where you left off, not just the physics state.
-
-Visual styling (colors, fonts, HUD layout) lives in `style.css`.
+* **N-Body Gravitational Dynamics**: Every massive entity exerts mutual gravitational attraction using Newton's law with Plummer softening:
+  $$\vec{a}_i = \sum_{j \neq i} \frac{G M_j (\vec{r}_j - \vec{r}_i)}{\left(|\vec{r}_j - \vec{r}_i|^2 + \epsilon^2\right)^{3/2}}$$
+* **Symplectic Velocity Verlet Integration**: Preserves phase space volume and maintains long-term orbital energy conservation over large simulation timescales:
+  $$\vec{x}(t + \Delta t) = \vec{x}(t) + \vec{v}(t)\Delta t + \frac{1}{2}\vec{a}(t)\Delta t^2$$
+  $$\vec{v}(t + \Delta t) = \vec{v}(t) + \frac{1}{2}\left(\vec{a}(t) + \vec{a}(t + \Delta t)\right)\Delta t$$
+* **Adaptive Sub-Stepping**: Large frame deltas (e.g., at $1000\times$ time acceleration) are automatically subdivided into bounded numerical sub-steps ($\le \text{maxSubstep}$) to eliminate orbital tunneling through capture radii.
+* **Roche Limit & Tidal Disruption**: Celestial bodies entering a black hole's tidal disruption zone undergo physical mesh elongation along their tangential orbital vector before fragmenting into debris that spirals into the event horizon.
+* **Relativistic Binary Black Hole Mergers**: Proximity encounters between singularities trigger orbital energy dissipation, spiral coalescence into a combined remnant, and outward gravitational wave shockwaves.
+* **Stellar Evolution**: Stars age according to mass-luminosity scaling ($t_{\text{life}} \propto M^{-1.6}$), expanding into red giants or supergiants before collapsing into white dwarfs, neutron stars, or stellar-mass black holes via core-collapse supernovae.
+* **Collisions & Coalescence**: Low-velocity encounters ($|v_{\text{rel}}| < 12\text{ u/s}$) conserve linear momentum and volume to merge bodies into larger objects; high-velocity impacts shatter progenitors into asteroid debris clouds.
 
 ---
 
-## Architecture notes
+## State Persistence & Save Format (Version 3)
 
-Almost every module in `src/` shares mutable data (the body list, the current selection, sim time, ...). ES modules give you live *read* access to another module's exports, but you can never reassign an imported binding from outside its home module — so instead of scattered `export let` primitives, every shared mutable value is a **property on the single `state` object** exported from `state.js`. Modules read/write `state.bodies`, `state.selected`, etc.; only the property changes, never the object identity, so every module always sees the same live data.
+The simulation uses a versioned JSON state serialization schema (`Version 3`) that captures the full operational environment:
 
-A few modules import from each other in both directions (e.g. `selection.js` needs `destroyObject` from `effects.js`, and `effects.js` needs `deselect` from `selection.js`). This is safe here because every such reference is used inside a function body — never at a module's top level — and is always a hoisted `function` declaration, so it's available the moment its module starts evaluating, cycle or not.
+* **Physical State**: Position, velocity, mass, visual radius, surface temperature, age, lifespan, and stellar stage.
+* **Hierarchical Relationships**: Parent/child linkages (e.g. moons orbiting planets) are serialized via stable array index references (`parentIndex`) and reconstructed in a two-phase deserialization pass.
+* **Camera & Viewport**: Exact camera Cartesian coordinates, OrbitControls target look-at, tracking modes, and active selection markers.
+* **Configuration Integrity**: Parameter values are clamped against safe physical bounds on load to prevent numerical instability.
+* **Backward Compatibility**: Automatically detects and loads legacy Version 2 saves without hierarchical relationship errors.
 
 ---
 
-## Performance notes
+## Performance Optimizations
 
-- Asteroids render as a single `InstancedMesh` with a spatial grid for collision checks and Velocity Verlet integration at no extra cost over the old scheme (same number of gravity calculations per asteroid per sub-step).
-- Gravity integration reuses a persistent scratch acceleration vector per body/asteroid (swapped, not reallocated, each sub-step), and trails use a true circular buffer instead of clone+push+shift — together these eliminate what were the two largest per-frame allocation sources in the app, particularly with a large asteroid field at high time-scale.
-- If things feel sluggish, lower **Asteroid Count** first — it's the biggest lever. Automatic scaling now has two escalating tiers: after a few seconds of sustained low frame rate it first thins the asteroid field once, and if that alone isn't enough, it then drops render resolution to 1x pixel ratio. Neither re-triggers once applied.
-- The Debug HUD (⚙) breaks physics time down into gravity/integration, collisions, and asteroid-field phases, plus fragment/particle counts, if you want to see where time is actually going.
-- Bloom and lensing are full-screen post-process passes (`src/scene.js`); on lower-end GPUs, reduce `diskBrightness`/`lensStrength` or the `UnrealBloomPass` strength there to lighten the load.
+1. **Instanced Rendering**: Asteroids render via a single Three.js `InstancedMesh` with dynamic transform buffer updates.
+2. **Spatial Hash Partitioning**: Inter-asteroid collisions use a 2D spatial hash grid on the orbital plane ($O(N)$ broad-phase search).
+3. **Memory Allocations**: Inner physics integration loops utilize persistent scratch buffers (`_newAcceleration`, reusable vector pools, and circular array buffers for trails) to eliminate runtime garbage collection stutter.
+4. **Automated Adaptive Scaling**: Two-tier automatic performance protection:
+   * *Tier 1*: Thins asteroid field density if framerate drops below 30 FPS.
+   * *Tier 2*: Downsamples WebGL pixel ratio to $1.0\times$ on high-DPI displays if framerate remains constrained.
+
+---
+
+## Technical Notes & Approximations
+
+* **Stylized Units**: Mass, distances, and velocities are scaled for interactive real-time observation and visual pacing rather than exact general relativistic metrics.
+* **Screen-Space Gravitational Lensing**: Lensing distortion is computed via a post-processing ShaderPass mapped to the projected screen-space coordinate of the dominant singularity.
+* **Trajectory Line Prediction**: Predictive orbit paths are computed via single-attractor forward integration at each step to deliver responsive $O(N)$ rendering during live dragging.
