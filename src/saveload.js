@@ -291,6 +291,7 @@ const CONFIG_BOUNDS = {
   tdeCircularizationTimescale: [0.2, 10.0],
   tdeCircVelocityThreshold: [0.01, 0.5],
   tdeMaxCircularizationTime: [0.5, 20.0],
+  tdeEddingtonFeedbackStrength: [0.0, 2.0],
 };
 
 /**

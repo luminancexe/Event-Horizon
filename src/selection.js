@@ -373,7 +373,10 @@ export function updateInfoPanel() {
     const etaVal = bh.accretionEfficiency ?? 0;
     const etaStr = bh.diskMass > 0 && etaVal > 0 ? ` | η: ${(etaVal * 100).toFixed(1)}%` : '';
     const eddRatio = bh.eddingtonRatio ?? 0;
-    const eddStr = bh.diskMass > 0 && eddRatio > 0 ? ` | λ_Edd: ${eddRatio.toFixed(2)}` : '';
+    const isRegulated = CONFIG.tdeEddingtonLimitEnabled && eddRatio > 1.0;
+    const eddStr = bh.diskMass > 0 && eddRatio > 0 ? ` | λ_Edd: ${eddRatio.toFixed(2)}${isRegulated ? ' [REGULATED]' : ''}` : '';
+    const mDotVal = isRegulated ? bh.effectiveAccretionRate : bh.accretionRate;
+    const mDotStr = isRegulated ? `Ṁ_eff: ${mDotVal.toFixed(2)} M☉/s` : `Ṁ: ${mDotVal.toFixed(2)} M☉/s`;
     const tempStr = bh.diskTemperature > 0 ? ` | T: ${(bh.diskTemperature / 1e6).toFixed(2)} MK` : '';
     const circStr = circCount > 0 ? ` | CIRC: ${circCount} pkts` : '';
 
@@ -382,7 +385,7 @@ export function updateInfoPanel() {
         ? 'HAWKING EMISSION'
         : bh.diskMat
         ? (bh.diskMass > 0 || circCount > 0
-            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | Ṁ: ${bh.accretionRate.toFixed(2)} M☉/s${etaStr}${eddStr}${tempStr}${circStr})`
+            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | ${mDotStr}${etaStr}${eddStr}${tempStr}${circStr})`
             : (CONFIG.dopplerBeamingEnabled ? `ACCRETION | DOPPLER i=${inclinationDeg.toFixed(0)}\u00b0` : 'ACCRETION (DOPPLER OFF)'))
         : 'INACTIVE';
     $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';

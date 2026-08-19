@@ -632,6 +632,7 @@ const _scratchErgoQuat = new THREE.Quaternion();
 const _scratchDiskQuat = new THREE.Quaternion();
 const _scratchNormalY = new THREE.Vector3(0, 1, 0);
 const _scratchSpinDir = new THREE.Vector3();
+const _scratchRadRel = new THREE.Vector3();
 
 /**
  * Gravitational singularity with event horizon, photon ring, optional accretion disk,
@@ -674,6 +675,29 @@ export class BlackHole extends CelestialBody {
   }
 
   /**
+   * Regulated physical accretion rate (simulation mass units / second):
+   * In the sub-Eddington regime (lambda <= 1), equals the viscous supply rate.
+   * In the super-Eddington regime (lambda > 1), regulated via Shakura-Sunyaev / Abramowicz (1988)
+   * slim-disk logarithmic advection: M_dot_eff = M_dot_Edd * (1 + ln(lambda_Edd)).
+   * @returns {number}
+   */
+  get effectiveAccretionRate() {
+    const mDotSupply = this.accretionRate;
+    if (!CONFIG.tdeEddingtonLimitEnabled || mDotSupply <= 0 || this.mass <= 0) {
+      return mDotSupply;
+    }
+    const lambda = this.eddingtonRatio;
+    if (lambda <= 1.0) {
+      return mDotSupply;
+    }
+    const eta = Math.max(this.accretionEfficiency, 0.01);
+    const kEdd = 1.26e-5;
+    const mDotEdd = (kEdd * this.mass) / eta;
+    const mDotRegulated = mDotEdd * (1.0 + Math.log(lambda));
+    return Math.min(mDotSupply, Math.max(0, mDotRegulated));
+  }
+
+  /**
    * Relativistic radiative accretion efficiency eta = 1 - E_ISCO based on Kerr spin:
    *   eta in [0.038 (retrograde), 0.057 (Schwarzschild), 0.324 (near-maximal prograde)]
    * @returns {number}
@@ -691,6 +715,26 @@ export class BlackHole extends CelestialBody {
     if (mDot <= 0) return 0;
     const eta = this.accretionEfficiency;
     return eta * mDot * (C_SIM * C_SIM);
+  }
+
+  /**
+   * Physical emergent accretion luminosity in simulation units:
+   * Saturated in the super-Eddington regime via slim-disk photon trapping:
+   *   L_emergent = L_Edd * (1 + ln(lambda_Edd)) for lambda_Edd > 1.
+   * @returns {number}
+   */
+  get emergentLuminosity() {
+    const lAcc = this.accretionLuminosity;
+    if (!CONFIG.tdeEddingtonLimitEnabled || lAcc <= 0 || this.mass <= 0) {
+      return lAcc;
+    }
+    const lambda = this.eddingtonRatio;
+    if (lambda <= 1.0) {
+      return lAcc;
+    }
+    const lEdd = this.eddingtonLuminosity;
+    const lEmergent = lEdd * (1.0 + Math.log(lambda));
+    return Math.min(lAcc, Math.max(0, lEmergent));
   }
 
   /**
@@ -712,6 +756,39 @@ export class BlackHole extends CelestialBody {
     const lEdd = this.eddingtonLuminosity;
     if (lEdd <= 0) return 0;
     return this.accretionLuminosity / lEdd;
+  }
+
+  /**
+   * Computes outward radiation pressure acceleration vector at a given position.
+   *   a_rad = k_fb * lambda_eff * (G * M_BH / r^2) * r_hat
+   * where lambda_eff = (lambda <= 1) ? lambda : (1 + ln(lambda))
+   *
+   * @param {THREE.Vector3} pos - Target sample point position.
+   * @param {THREE.Vector3} out - Target vector to store computed acceleration.
+   * @returns {THREE.Vector3} Output acceleration vector.
+   */
+  computeRadiationAcceleration(pos, out) {
+    out.set(0, 0, 0);
+    if (!CONFIG.tdeRadiationPressureEnabled || this.mass <= 0 || this.diskMass <= 0) {
+      return out;
+    }
+    const lambda = this.eddingtonRatio;
+    if (lambda <= 0) {
+      return out;
+    }
+    const lambdaEff = lambda <= 1.0 ? lambda : (1.0 + Math.log(lambda));
+    const kFb = CONFIG.tdeEddingtonFeedbackStrength ?? 1.0;
+    if (kFb <= 0) return out;
+
+    _scratchRadRel.subVectors(pos, this.mesh.position);
+    const rSq = _scratchRadRel.lengthSq();
+    const r = Math.sqrt(rSq);
+    if (r < 0.001) return out;
+
+    const gM = CONFIG.G * this.mass;
+    const aMag = Math.min(250, (kFb * lambdaEff * gM) / Math.max(rSq, 0.1));
+    out.copy(_scratchRadRel).multiplyScalar(aMag / r);
+    return out;
   }
 
   /**

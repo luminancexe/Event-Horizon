@@ -29,6 +29,8 @@ export const CONFIG = {
   tdeMaxCircularizationTime: 3.5,   // Maximum duration (simulation seconds) for circularizing state before disk assimilation
   tdeSpinEvolutionEnabled: true,    // Relativistic Kerr spin evolution from accretion angular momentum torque
   tdeEddingtonLimitEnabled: true,   // Eddington luminosity and accretion rate diagnostics & clamping
+  tdeRadiationPressureEnabled: true,// Master switch for outward radiation pressure on TDE plasma streams
+  tdeEddingtonFeedbackStrength: 1.0,// Multiplier for radiation pressure feedback force (0.0 - 2.0)
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch

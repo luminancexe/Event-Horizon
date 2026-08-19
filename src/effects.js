@@ -243,6 +243,7 @@ const _scratchDiskRHat = new THREE.Vector3();
 const _scratchDiskTHat = new THREE.Vector3();
 const _scratchDiskTargetVel = new THREE.Vector3();
 const _scratchDiskRelVel = new THREE.Vector3();
+const _scratchTdeRadAcc = new THREE.Vector3();
 
 /**
  * High-performance GPU-instanced stream manager for continuous relativistic
@@ -645,6 +646,13 @@ export class TDEStreamManager {
       if (this.pPhase[i] === TDE_STREAM_FREE) {
         // Gravitational acceleration (Newtonian direct-sum + Lense-Thirring)
         computeTotalAcceleration(_scratchTdePos, _scratchTdeVel, null, state.bodies, _scratchTdeAcc);
+
+        // Relativistic radiation pressure from primary attractor singularity
+        if (CONFIG.tdeRadiationPressureEnabled && targetBh && targetBh.diskMass > 0) {
+          targetBh.computeRadiationAcceleration(_scratchTdePos, _scratchTdeRadAcc);
+          _scratchTdeAcc.add(_scratchTdeRadAcc);
+        }
+
         _scratchTdeVel.addScaledVector(_scratchTdeAcc, dt);
       }
       _scratchTdePos.addScaledVector(_scratchTdeVel, dt);
@@ -725,8 +733,7 @@ export class TDEStreamManager {
     const bhs = blackHoles();
     for (const bh of bhs) {
       if (bh.diskMass > 0) {
-        const tau = CONFIG.tdeViscousTimescale || 6.0;
-        const mDot = tau > 0 ? bh.diskMass / tau : 0;
+        const mDot = CONFIG.tdeEddingtonLimitEnabled ? bh.effectiveAccretionRate : bh.accretionRate;
         const dM0 = Math.min(bh.diskMass, mDot * dt);
         if (dM0 > 0) {
           if (CONFIG.tdeSpinEvolutionEnabled) {
