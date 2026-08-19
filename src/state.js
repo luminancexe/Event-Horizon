@@ -1,93 +1,127 @@
-/* =========================================================================
-   STATE.JS — configuration and shared mutable state.
+/**
+ * @file state.js
+ * @description Centralized application state and simulation constants for Event Horizon.
+ *
+ * Exposes the immutable simulation configuration defaults (CONFIG) and a shared mutable
+ * state container (`state`). Cross-module updates mutate properties on `state` to maintain
+ * consistent references across ES module boundaries without requiring re-exports.
+ */
 
-   ES modules give live bindings for named exports, but an imported binding
-   can never be *reassigned* from outside the module that owns it (only
-   mutated if it's an object). Since almost everything in this app touches
-   things like "the current body list" or "the currently selected object",
-   every cross-module mutable value lives as a *property* on the single
-   `state` object below, rather than as a bare exported `let`. Modules can
-   freely read/write `state.bodies`, `state.selected`, etc. Anything that's
-   truly private to one module (a cooldown timer, a loop counter) stays a
-   local `let` inside that module instead of living here.
-   ========================================================================= */
-
+/**
+ * Global runtime simulation parameters, controllable via UI sliders and serializable to save files.
+ */
 export const CONFIG = {
-  G: 0.6,
-  blackHoleMass: 5000,       // mirrors the primary black hole's mass, kept for the slider
-  timeScale: 1,
-  paused: false,
-  asteroidCount: 400,
-  diskBrightness: 1.0,
-  lensStrength: 1.0,
-  gravityEnabled: true,      // can be switched off for performance A/B testing
-  debugMode: false,
-  overlayVelocity: false,
-  overlayForce: false,
-  overlayAccel: false,
-  overlayPaths: true,
-  overlayCOM: false,
-  overlayCollision: false,
-  trailsEnabled: true,       // master trail visibility, independent of debug mode
-  trailLength: 140,          // points kept per trail; changing this live-resizes existing trails
-  maxSubstep: 0.12,          // physics timestep/tick-rate: smaller = finer integration, more CPU
+  G: 0.6,                    // Gravitational constant scaling factor
+  blackHoleMass: 5000,       // Reference mass of the primary singularity (M☉)
+  timeScale: 1,              // Simulation time multiplier
+  paused: false,             // Simulation pause state
+  asteroidCount: 400,        // Active asteroid particle capacity
+  diskBrightness: 1.0,       // Accretion disk shader intensity multiplier
+  lensStrength: 1.0,         // Gravitational lensing post-processing distortion strength
+  gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
+  debugMode: false,          // Physics debug HUD and overlay visibility
+  overlayVelocity: false,    // Render velocity vector arrows
+  overlayForce: false,       // Render net force vector arrows
+  overlayAccel: false,       // Render net acceleration vector arrows
+  overlayPaths: true,        // Render orbital trajectory trails
+  overlayCOM: false,         // Render system center of mass indicator
+  overlayCollision: false,   // Render collision boundary wireframes
+  trailsEnabled: true,       // Global motion trail visibility
+  trailLength: 140,          // Sample point capacity per orbital trail buffer
+  maxSubstep: 0.12,          // Maximum integration timestep size (seconds) per physics sub-step
 };
 
-export const BASE_HORIZON   = 9;      // visual radius of a "reference mass" black hole
-export const BASE_BH_MASS    = 5000;
-export const CAPTURE_MULT    = 1.15;
-export const TIDAL_MULT      = 4.2;
-export const DRAG_MULT       = 7.5;
-export const ESCAPE_R        = 480;
-export const SOFTENING       = 2.2;   // gravitational softening to avoid singular blow-ups
-export const VELOCITY_DRAG_SCALE = 0.26; // world-units-of-velocity per world-unit of drag
-export const AGE_YEARS_PER_SIMSECOND = 6;
-export const STAR_LIFESPAN_K = 60000; // heavier stars burn through this much faster (see createStar)
+/* ============================================================================
+   ASTROPHYSICAL AND NUMERICAL CONSTANTS
+   ============================================================================ */
 
-// at high time-scales a single frame can represent many sim-seconds; integrating
-// the whole thing in one Euler step would let fast-moving bodies tunnel through
-// capture radii or blow up numerically, so we always split big steps into
-// bounded sub-steps instead. The sub-step *size* is user-tunable (CONFIG.maxSubstep,
-// clamped in the UI); these two counts are hard safety ceilings on how many
-// sub-steps a single frame can ever spend, regardless of that setting.
-export const MAX_SUBSTEPS_BODY     = 40;
+/** Visual radius of a standard 5000 M☉ black hole event horizon */
+export const BASE_HORIZON = 9;
+
+/** Reference mass used for cubic-root scale normalizations */
+export const BASE_BH_MASS = 5000;
+
+/** Multiplier defining the gravitational capture (event horizon) radius */
+export const CAPTURE_MULT = 1.15;
+
+/** Multiplier defining the Roche limit / tidal disruption threshold */
+export const TIDAL_MULT = 4.2;
+
+/** Multiplier defining the accretion disk hydrodynamic drag boundary */
+export const DRAG_MULT = 7.5;
+
+/** Maximum boundary distance from origin before an object is classified as escaped */
+export const ESCAPE_R = 480;
+
+/** Plummer gravitational softening factor to prevent numerical singularities at r -> 0 */
+export const SOFTENING = 2.2;
+
+/** Velocity scaling factor applied to drag-launch vector magnitude (world units to velocity) */
+export const VELOCITY_DRAG_SCALE = 0.26;
+
+/** Conversion factor: simulation seconds elapsed per simulation year */
+export const AGE_YEARS_PER_SIMSECOND = 6;
+
+/** Scaling factor for stellar main-sequence lifespan calculations (t ~ M^-1.6) */
+export const STAR_LIFESPAN_K = 60000;
+
+/** Hard upper limit on numerical sub-steps per frame for massive bodies */
+export const MAX_SUBSTEPS_BODY = 40;
+
+/** Hard upper limit on numerical sub-steps per frame for asteroid field integration */
 export const MAX_SUBSTEPS_ASTEROID = 8;
 
-export const COLLISION_MERGE_SPEED = 12; // relative speed below which bodies merge instead of fragmenting
-export const COLLISION_GRACE_MS = 900;   // newly spawned bodies are briefly immune (e.g. a moon placed close to its planet)
+/** Relative velocity threshold (world units/s) below which collisions merge rather than shatter */
+export const COLLISION_MERGE_SPEED = 12;
 
+/** Grace period (ms) following body creation during which collision checks are suppressed */
+export const COLLISION_GRACE_MS = 900;
+
+/* ============================================================================
+   SHARED RUNTIME STATE CONTAINER
+   ============================================================================ */
+
+/**
+ * Mutable state singleton shared across simulation, rendering, and UI modules.
+ */
 export const state = {
-  // simulation clock
+  // Simulation timers
   simTime: 0,
   simYears: 0,
-  gravityCalcCount: 0, // reset each frame, used by the debug overlay
+  gravityCalcCount: 0,
 
-  // body registry
+  // Celestial body registry
   bodies: [],
   idCounter: 1,
   selected: null,
   followTarget: null,
 
-  // asteroid field (parallel arrays + the instanced mesh that renders them)
+  // Instanced asteroid field (parallel arrays for contiguous memory layout)
   asteroidMesh: null,
-  aPos: [], aVel: [], aAcc: [], aNewAcc: [], aMass: [], aRadius: [], aAlive: [],
+  aPos: [],
+  aVel: [],
+  aAcc: [],
+  aNewAcc: [],
+  aMass: [],
+  aRadius: [],
+  aAlive: [],
 
-  // debris that spirals into a black hole after a tidal disintegration
+  // Tidal disruption debris fragments
   fragments: [],
 
-  // camera
+  // Camera animation and kinematic state
   cameraMode: 'free',
   cameraTween: null,
   shakeState: null,
 
-  // object placement / drag-to-launch
+  // Interactive object placement state
   placement: null,
   ghostMarker: null,
 
-  // misc UI state
+  // UI state
   browserCollapsed: true,
 
-  // debug HUD stats (written by physics.js / main.js, read by ui.js)
+  // Performance telemetry and profiling metrics (ms)
   lastPhysicsMs: 0,
   lastGravityMs: 0,
   lastCollisionMs: 0,

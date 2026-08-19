@@ -1,3 +1,15 @@
+/**
+ * @file selection.js
+ * @description Raycasting object selection, Hill sphere calculations, trajectory prediction, and inspector telemetry.
+ *
+ * Implements:
+ * 1. Screen-to-world raycasting for selecting massive bodies and instanced asteroids.
+ * 2. Visual selection helpers (focus rings, velocity vector arrows, Hill sphere / gravitational influence envelopes).
+ * 3. Forward-integrated numerical trajectory preview paths.
+ * 4. Hierarchical breadcrumb navigation paths (Universe -> Black Hole -> Star -> Planet -> Moon).
+ * 5. Comprehensive real-time astronomical telemetry panel updates.
+ */
+
 import * as THREE from 'three';
 import { CONFIG, state } from './state.js';
 import { scene, camera } from './scene.js';
@@ -7,42 +19,78 @@ import { flyCameraTo, setCameraMode } from './camera.js';
 import { logEvent, showBanner } from './events.js';
 import { destroyObject } from './effects.js';
 
-/* =========================================================================
-   SELECTION VISUALS (shared, repositioned to whichever object is selected)
-   ========================================================================= */
-export const selectionRing = new THREE.Sprite(new THREE.SpriteMaterial({ map: selectionRingTex, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+/* ============================================================================
+   SELECTION VISUAL HELPERS & TRAJECTORY PREDICTION
+   ============================================================================ */
+
+export const selectionRing = new THREE.Sprite(
+  new THREE.SpriteMaterial({
+    map: selectionRingTex,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+  })
+);
 selectionRing.visible = false;
 scene.add(selectionRing);
 
-export const velocityArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, 0xffe066, 2.2, 1.3);
+export const velocityArrow = new THREE.ArrowHelper(
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(),
+  1,
+  0xffe066,
+  2.2,
+  1.3
+);
 velocityArrow.visible = false;
 scene.add(velocityArrow);
 
 export const influenceSphere = new THREE.Mesh(
   new THREE.SphereGeometry(1, 24, 16),
-  new THREE.MeshBasicMaterial({ color: 0x7fd9ff, wireframe: true, transparent: true, opacity: 0.16, depthWrite: false })
+  new THREE.MeshBasicMaterial({
+    color: 0x7fd9ff,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.16,
+    depthWrite: false,
+  })
 );
 influenceSphere.visible = false;
 scene.add(influenceSphere);
 
-// predicted trajectory (single reusable dashed line, approximated against the
-// single strongest local attractor at each simulated step)
 const predictGeo = new THREE.BufferGeometry();
 const predictPositions = new Float32Array(80 * 3);
 predictGeo.setAttribute('position', new THREE.BufferAttribute(predictPositions, 3));
-export const predictLine = new THREE.Line(predictGeo, new THREE.LineDashedMaterial({ color: 0x7fd9ff, dashSize: 3, gapSize: 2, transparent: true, opacity: 0.65 }));
+export const predictLine = new THREE.Line(
+  predictGeo,
+  new THREE.LineDashedMaterial({
+    color: 0x7fd9ff,
+    dashSize: 3,
+    gapSize: 2,
+    transparent: true,
+    opacity: 0.65,
+  })
+);
 predictLine.visible = false;
 scene.add(predictLine);
 
-// shared forward-integration used by both the selection prediction line above
-// and the drag-to-launch preview line in creation.js: a cheap "dominant
-// single attractor" approximation, recomputed every step so it still bends
-// correctly around whichever body currently matters most
-export const PREDICT_STEPS = 80, PREDICT_DT = 0.6;
+export const PREDICT_STEPS = 80;
+export const PREDICT_DT = 0.6;
+
+/**
+ * Forward-integrates an estimated orbital trajectory line from initial kinematic conditions.
+ * Evaluates the dominant local gravitational attractor at each step to curve the line accurately.
+ *
+ * @param {THREE.BufferGeometry} geo - Buffer geometry holding the path positions.
+ * @param {THREE.Vector3} startPos - Initial world position.
+ * @param {THREE.Vector3} startVel - Initial velocity vector.
+ */
 export function fillPredictedPath(geo, startPos, startVel) {
   const p = startPos.clone();
   const v = startVel.clone();
   const arr = geo.attributes.position.array;
+
   for (let i = 0; i < PREDICT_STEPS; i++) {
     const dominant = findDominantAttractor(p, null);
     if (dominant) {
@@ -52,47 +100,102 @@ export function fillPredictedPath(geo, startPos, startVel) {
       v.addScaledVector(rel.normalize(), a * PREDICT_DT);
     }
     p.addScaledVector(v, PREDICT_DT);
-    arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z;
+    arr[i * 3] = p.x;
+    arr[i * 3 + 1] = p.y;
+    arr[i * 3 + 2] = p.z;
+
     const { bh: pbh, dist: pr } = nearestBlackHole(p);
-    if (pbh && pr < bhRadii(pbh).capture) { for (let j = i + 1; j < PREDICT_STEPS; j++) { arr[j*3]=p.x;arr[j*3+1]=p.y;arr[j*3+2]=p.z; } break; }
+    if (pbh && pr < bhRadii(pbh).capture) {
+      for (let j = i + 1; j < PREDICT_STEPS; j++) {
+        arr[j * 3] = p.x;
+        arr[j * 3 + 1] = p.y;
+        arr[j * 3 + 2] = p.z;
+      }
+      break;
+    }
   }
   geo.attributes.position.needsUpdate = true;
   geo.computeBoundingSphere();
   geo.computeLineDistances();
 }
 
-/* =========================================================================
-   SELECTION / RAYCASTING
-   ========================================================================= */
+/* ============================================================================
+   RAYCASTING SELECTION & SPATIAL HIERARCHY
+   ============================================================================ */
+
 const selectableMap = new Map();
-export function registerSelectable(mesh, obj) { selectableMap.set(mesh.uuid, obj); }
-export function unregisterSelectable(mesh) { selectableMap.delete(mesh.uuid); }
+
+/**
+ * Registers a mesh in the raycasting lookup map.
+ * @param {THREE.Object3D} mesh - Interactive mesh.
+ * @param {CelestialBody} obj - Associated celestial body instance.
+ */
+export function registerSelectable(mesh, obj) {
+  selectableMap.set(mesh.uuid, obj);
+}
+
+/**
+ * Removes a mesh from the raycasting lookup map.
+ * @param {THREE.Object3D} mesh - Interactive mesh to unregister.
+ */
+export function unregisterSelectable(mesh) {
+  selectableMap.delete(mesh.uuid);
+}
 
 export const raycaster = new THREE.Raycaster();
 export const pointerNDC = new THREE.Vector2();
 
+/**
+ * Resolves mouse or touch clicks into scene selection intersections.
+ */
 export function handleClick() {
   raycaster.setFromCamera(pointerNDC, camera);
-  const meshes = [...selectableMap.keys()].map((uuid) => scene.getObjectByProperty('uuid', uuid)).filter(Boolean);
+  const meshes = [...selectableMap.keys()]
+    .map((uuid) => scene.getObjectByProperty('uuid', uuid))
+    .filter(Boolean);
+
   const hits = raycaster.intersectObjects(meshes, false);
   let asteroidHit = null;
+
   if (state.asteroidMesh) {
     const ahits = raycaster.intersectObject(state.asteroidMesh);
-    if (ahits.length && (!hits.length || ahits[0].distance < hits[0].distance)) asteroidHit = ahits[0];
+    if (ahits.length && (!hits.length || ahits[0].distance < hits[0].distance)) {
+      asteroidHit = ahits[0];
+    }
   }
-  if (asteroidHit && !hits.length) { selectAsteroid(asteroidHit.instanceId); return; }
-  if (hits.length === 0) { deselect(); return; }
+
+  if (asteroidHit && !hits.length) {
+    selectAsteroid(asteroidHit.instanceId);
+    return;
+  }
+  if (hits.length === 0) {
+    deselect();
+    return;
+  }
+
   const obj = selectableMap.get(hits[0].object.uuid);
   if (obj) select(obj);
 }
 
+/**
+ * Updates the topbar breadcrumb UI with hierarchical navigational segments.
+ * @param {string[]} parts - Ordered breadcrumb segment titles.
+ */
 export function updateBreadcrumb(parts) {
   document.getElementById('breadcrumb-bar').textContent = parts.join(' \u203a ');
 }
+
+/**
+ * Traces the gravitational attractor hierarchy upward from a body to the global origin.
+ *
+ * @param {CelestialBody} obj - Target celestial body.
+ * @returns {string[]} Hierarchy chain array.
+ */
 export function breadcrumbChainFor(obj) {
   const chain = [];
   let current = obj;
   let guard = 0;
+
   while (current && guard++ < 6) {
     chain.unshift(current.name);
     if (current.type === 'blackhole') break;
@@ -101,10 +204,23 @@ export function breadcrumbChainFor(obj) {
   return ['UNIVERSE', ...chain];
 }
 
+/**
+ * Focuses selection on a celestial body and activates inspector panels.
+ * @param {CelestialBody} obj - Target celestial body.
+ */
 export function select(obj) {
-  if (state.selected && state.selected.trail) { state.selected.trail.boosted = false; state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity; }
+  if (state.selected && state.selected.trail) {
+    state.selected.trail.boosted = false;
+    state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity;
+  }
+
   state.selected = obj;
-  if (obj.trail) { obj.trail.boosted = true; obj.trail.line.material.opacity = Math.min(0.9, obj.trail.baseOpacity * 2.2); }
+
+  if (obj.trail) {
+    obj.trail.boosted = true;
+    obj.trail.line.material.opacity = Math.min(0.9, obj.trail.baseOpacity * 2.2);
+  }
+
   document.getElementById('info-panel').classList.remove('hidden');
   document.getElementById('btn-follow').disabled = false;
   document.getElementById('btn-orbit').disabled = false;
@@ -113,20 +229,45 @@ export function select(obj) {
   predictLine.visible = obj.type !== 'blackhole';
   updateBreadcrumb(breadcrumbChainFor(obj));
 }
+
+/**
+ * Focuses selection on an individual asteroid instance.
+ * @param {number} instanceId - Index into the asteroid particle arrays.
+ */
 export function selectAsteroid(instanceId) {
-  if (state.selected && state.selected.trail) { state.selected.trail.boosted = false; state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity; }
-  state.selected = { type: 'asteroid', name: `AST-${instanceId}`, isAsteroid: true, index: instanceId };
+  if (state.selected && state.selected.trail) {
+    state.selected.trail.boosted = false;
+    state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity;
+  }
+
+  state.selected = {
+    type: 'asteroid',
+    name: `AST-${instanceId}`,
+    isAsteroid: true,
+    index: instanceId,
+  };
+
   document.getElementById('info-panel').classList.remove('hidden');
   document.getElementById('btn-follow').disabled = true;
   document.getElementById('btn-orbit').disabled = true;
   document.getElementById('btn-delete-obj').classList.add('hidden');
   document.getElementById('btn-enter-system').classList.add('hidden');
   predictLine.visible = false;
+
   const dom = findDominantAttractor(state.aPos[instanceId], null);
-  updateBreadcrumb(dom ? [...breadcrumbChainFor(dom), state.selected.name] : ['UNIVERSE', state.selected.name]);
+  updateBreadcrumb(
+    dom ? [...breadcrumbChainFor(dom), state.selected.name] : ['UNIVERSE', state.selected.name]
+  );
 }
+
+/**
+ * Clears current selection state and hides inspector visuals.
+ */
 export function deselect() {
-  if (state.selected && state.selected.trail) { state.selected.trail.boosted = false; state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity; }
+  if (state.selected && state.selected.trail) {
+    state.selected.trail.boosted = false;
+    state.selected.trail.line.material.opacity = state.selected.trail.baseOpacity;
+  }
   state.selected = null;
   document.getElementById('info-panel').classList.add('hidden');
   document.getElementById('btn-follow').disabled = true;
@@ -136,25 +277,42 @@ export function deselect() {
   selectionRing.visible = velocityArrow.visible = influenceSphere.visible = false;
   updateBreadcrumb(['UNIVERSE']);
 }
+
+/* Event bindings for selection action buttons */
 document.getElementById('btn-delete-obj').addEventListener('click', () => {
-  if (state.selected && !state.selected.isAsteroid && state.selected.type !== 'blackhole') destroyObject(state.selected, 'removed', true);
+  if (state.selected && !state.selected.isAsteroid && state.selected.type !== 'blackhole') {
+    destroyObject(state.selected);
+  }
   deselect();
 });
+
 document.getElementById('btn-enter-system').addEventListener('click', () => {
   if (!state.selected || state.selected.type !== 'star') return;
   const star = state.selected;
-  const members = state.bodies.filter((b) => b !== star && findDominantAttractor(b.mesh.position, b) === star);
+  const members = state.bodies.filter(
+    (b) => b !== star && findDominantAttractor(b.mesh.position, b) === star
+  );
   let radius = 35;
-  for (const m of members) radius = Math.max(radius, m.mesh.position.distanceTo(star.mesh.position) + m.radius * 3);
+  for (const m of members) {
+    radius = Math.max(radius, m.mesh.position.distanceTo(star.mesh.position) + m.radius * 3);
+  }
   flyCameraTo(star.mesh.position, radius * 1.5 + 30, 1400);
   state.followTarget = star;
   setCameraMode('follow');
   logEvent(`Entering the ${star.name} system.`, 'info', star.mesh.position);
 });
 
-/* =========================================================================
-   INFO PANEL
-   ========================================================================= */
+/* ============================================================================
+   ASTRONOMICAL TELEMETRY & HILL SPHERE CALCULATIONS
+   ============================================================================ */
+
+/**
+ * Computes the Hill sphere radius for a body in orbit around a dominant attractor:
+ *   r_H = r * ( m / (3 * M_dom) )^(1/3)
+ *
+ * @param {CelestialBody} obj - Secondary body.
+ * @returns {{ hr: number, dom: CelestialBody }|null} Hill radius in world units and attractor ref.
+ */
 export function hillRadius(obj) {
   const dom = findDominantAttractor(obj.mesh.position, obj);
   if (!dom) return null;
@@ -163,6 +321,9 @@ export function hillRadius(obj) {
   return { hr, dom };
 }
 
+/**
+ * Updates the right-deck inspector panel with real-time astronomical telemetry.
+ */
 export function updateInfoPanel() {
   const selected = state.selected;
   if (!selected) return;
@@ -188,7 +349,10 @@ export function updateInfoPanel() {
 
   if (selected.isAsteroid) {
     const i = selected.index;
-    if (!state.aAlive[i]) { deselect(); return; }
+    if (!state.aAlive[i]) {
+      deselect();
+      return;
+    }
     const r = state.aPos[i].length();
     const dom = findDominantAttractor(state.aPos[i], null);
     $('info-name').textContent = selected.name;
@@ -217,22 +381,34 @@ export function updateInfoPanel() {
   $('info-name').textContent = obj.name;
   $('info-type').textContent = obj.type.toUpperCase();
   $('info-parent').textContent = dom ? dom.name : '—';
-  $('info-mass').textContent = obj.mass.toFixed(2) + (obj.type === 'star' || obj.type === 'neutron' ? ' M☉' : ' Mt');
+  $('info-mass').textContent =
+    obj.mass.toFixed(2) + (obj.type === 'star' || obj.type === 'neutron' ? ' M☉' : ' Mt');
   $('info-distance').textContent = (r / 10).toFixed(2) + ' AU';
   $('info-velocity').textContent = (speed / 60).toFixed(2) + 'c';
   const period = ((2 * Math.PI * r) / Math.max(speed, 0.001) / 10).toFixed(1);
   $('info-orbit').textContent = `${obj.status.toUpperCase()} (T≈${period}d)`;
-  $('info-temp').textContent = obj.type === 'star' ? Math.round(obj.tempK).toLocaleString() + ' K' : obj.type === 'neutron' ? '~1,000,000,000 K' : '—';
+  $('info-temp').textContent =
+    obj.type === 'star'
+      ? Math.round(obj.tempK).toLocaleString() + ' K'
+      : obj.type === 'neutron'
+      ? '~1,000,000,000 K'
+      : '—';
   $('info-age').textContent = Math.floor(obj.age).toLocaleString() + ' yrs';
+
   if (obj.type === 'star') {
     const pct = Math.min(100, (obj.age / obj.lifespan) * 100).toFixed(0);
-    const stageLabel = { main_sequence: 'MAIN SEQUENCE', giant: obj.isHighMass ? 'RED SUPERGIANT' : 'RED GIANT', remnant: 'REMNANT' }[obj.stage];
+    const stageLabel = {
+      main_sequence: 'MAIN SEQUENCE',
+      giant: obj.isHighMass ? 'RED SUPERGIANT' : 'RED GIANT',
+      remnant: 'REMNANT',
+    }[obj.stage];
     $('info-lifecycle').textContent = `${stageLabel} (${pct}%)`;
   } else if (obj.type === 'neutron') {
     $('info-lifecycle').textContent = 'STELLAR REMNANT';
   } else {
     $('info-lifecycle').textContent = '—';
   }
+
   $('info-tidal').textContent = (obj.tidalPercent ?? 0).toFixed(1) + '%';
   const hs = hillRadius(obj);
   $('info-influence').textContent = hs ? (hs.hr / 10).toFixed(2) + ' AU' : '—';
@@ -242,20 +418,34 @@ export function updateInfoPanel() {
   fillPredictedPath(predictGeo, obj.mesh.position, obj.velocity);
 }
 
+/**
+ * Positions and rescales the selection ring, velocity arrow, and Hill sphere wireframe.
+ *
+ * @param {THREE.Vector3} pos - Target position.
+ * @param {THREE.Vector3} vel - Velocity vector.
+ * @param {number} ringScale - Selection sprite scale.
+ * @param {{ hr: number, dom: CelestialBody }|null} hs - Hill sphere radius and attractor.
+ */
 export function positionSelectionVisuals(pos, vel, ringScale, hs) {
   selectionRing.visible = true;
   selectionRing.position.copy(pos);
   selectionRing.scale.set(ringScale, ringScale, 1);
+
   const speed = vel.length();
   if (speed > 0.05) {
     velocityArrow.visible = true;
     velocityArrow.position.copy(pos);
     velocityArrow.setDirection(vel.clone().normalize());
     velocityArrow.setLength(Math.min(speed * 1.8 + 2, 90), 2.4, 1.3);
-  } else velocityArrow.visible = false;
+  } else {
+    velocityArrow.visible = false;
+  }
+
   if (hs && hs.hr > 0.5) {
     influenceSphere.visible = true;
     influenceSphere.position.copy(pos);
     influenceSphere.scale.setScalar(hs.hr);
-  } else influenceSphere.visible = false;
+  } else {
+    influenceSphere.visible = false;
+  }
 }

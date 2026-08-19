@@ -1,9 +1,26 @@
+/**
+ * @file textures.js
+ * @description Procedural texture generators for canvas-backed sprites and materials.
+ *
+ * Generates radial gradient textures and ring sprites in offscreen canvas elements,
+ * converting them into Three.js CanvasTexture instances for point lights, glows,
+ * photon rings, and UI selection rings.
+ */
+
 import * as THREE from 'three';
 
-/* =========================================================================
-   TEXTURE HELPERS — small canvas-generated glow/ring sprites reused all
-   over the app (star glows, selection rings, photon rings, nebulae, ...).
-   ========================================================================= */
+/* ============================================================================
+   PROCEDURAL TEXTURE FACTORIES
+   ============================================================================ */
+
+/**
+ * Creates a radial gradient glow texture on an offscreen 2D canvas.
+ *
+ * @param {string} inner - Inner color stop CSS color string.
+ * @param {string} outer - Outer color stop CSS color string (typically transparent).
+ * @param {number} [size=128] - Canvas width and height in pixels.
+ * @returns {THREE.CanvasTexture} Texture suitable for additive particle and sprite blending.
+ */
 export function makeGlowTexture(inner, outer, size = 128) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -15,6 +32,14 @@ export function makeGlowTexture(inner, outer, size = 128) {
   ctx.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(c);
 }
+
+/**
+ * Creates an annular ring texture on an offscreen 2D canvas.
+ *
+ * @param {string} color - Ring peak color CSS string.
+ * @param {number} [size=256] - Canvas width and height in pixels.
+ * @returns {THREE.CanvasTexture} Texture suitable for UI selection rings and photon spheres.
+ */
 export function makeRingTexture(color, size = 256) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -29,5 +54,7 @@ export function makeRingTexture(color, size = 256) {
   ctx.fillRect(0, 0, size, size);
   return new THREE.CanvasTexture(c);
 }
+
+/* Pre-allocated shared procedural textures */
 export const starGlowTex = makeGlowTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)');
 export const selectionRingTex = makeRingTexture('rgba(127,217,255,0.95)');

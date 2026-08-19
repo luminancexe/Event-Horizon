@@ -10,12 +10,13 @@
 </head>
 <body>
 
+  <!-- WebGL Primary Viewport Canvas -->
   <canvas id="scene"></canvas>
 
-  <!-- vignette / scanline overlay -->
+  <!-- Vignette and CRT Scanline Overlay -->
   <div id="crt-overlay"></div>
 
-  <!-- TOP BAR -->
+  <!-- Topbar: Branding, Mission Clock, and Action Bar -->
   <header id="topbar">
     <div class="brand">
       <span class="brand-mark">&#9679;</span>
@@ -36,9 +37,10 @@
     </div>
   </header>
 
+  <!-- Hierarchical Breadcrumb Navigation -->
   <div id="breadcrumb-bar">UNIVERSE</div>
 
-  <!-- PHYSICS DEBUG HUD -->
+  <!-- Physics Telemetry Debug HUD -->
   <div id="debug-hud" class="panel hidden">
     <div class="panel-head"><span>PHYSICS DEBUG</span><span class="corner"></span></div>
     <div class="debug-body">
@@ -68,7 +70,7 @@
     </div>
   </div>
 
-  <!-- LEFT: CONTROL DECK -->
+  <!-- Left Dock: Simulation Control Deck -->
   <aside id="control-deck" class="panel">
     <div class="panel-head"><span>CONTROL DECK</span><span class="corner"></span></div>
 
@@ -159,7 +161,7 @@
     <div class="panel-hint">Right-click (or long-press) empty space also opens the creation menu</div>
   </aside>
 
-  <!-- RIGHT: INFO + LOG -->
+  <!-- Right Dock: Object Hierarchy Browser, Inspector, and Event Log -->
   <aside id="right-deck">
     <div id="browser-panel" class="panel collapsed">
       <div class="panel-head browser-toggle" id="browser-head-toggle">
@@ -196,7 +198,7 @@
     </div>
   </aside>
 
-  <!-- CONTEXT MENU -->
+  <!-- Context Menu for Entity Spawning -->
   <div id="context-menu" class="hidden">
     <div class="ctx-item" data-type="star">+ CREATE STAR</div>
     <div class="ctx-item" data-type="planet">+ CREATE PLANET</div>
@@ -206,7 +208,7 @@
     <div class="ctx-item" data-type="blackhole">+ CREATE BLACK HOLE</div>
   </div>
 
-  <!-- PLACEMENT PANEL: shown while positioning/launching a new object -->
+  <!-- Interactive Drag-to-Launch Placement Panel -->
   <div id="placement-panel" class="panel hidden">
     <div class="panel-head"><span id="placement-title">PLACING OBJECT</span><span class="corner"></span></div>
     <div class="placement-body">
@@ -222,10 +224,10 @@
     </div>
   </div>
 
-  <!-- NOTIFICATION BANNER -->
+  <!-- Notification Banner Toast -->
   <div id="notify-banner" class="hidden"></div>
 
-  <!-- HELP MODAL -->
+  <!-- Observatory Guide & Help Modal -->
   <div id="help-modal" class="modal hidden">
     <div class="modal-box panel">
       <div class="panel-head"><span>OBSERVATORY GUIDE</span><span class="corner"></span></div>
@@ -249,6 +251,7 @@
     </div>
   </div>
 
+  <!-- ES Module Import Map -->
   <script type="importmap">
   {
     "imports": {

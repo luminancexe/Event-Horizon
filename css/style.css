@@ -1,546 +1,987 @@
 /* ==========================================================================
-   EVENT HORIZON — STYLE SYSTEM
+   EVENT HORIZON — DESIGN SYSTEM & USER INTERFACE STYLESHEET
    ==========================================================================
-   Design tokens are defined as CSS custom properties in :root so every
-   component draws from the same palette and spacing scale. Changes to the
-   tokens cascade everywhere automatically.
+   Global design tokens, layout geometry, typography, and interactive components.
+   Custom properties defined in :root cascade across all observatory UI panels.
    ========================================================================== */
 
-:root{
-  /* ---- colour palette ---- */
-  --bg:#05060a;
-  --amber:#ffb454;
-  --amber-dim:#a06a2c;
-  --cyan:#7fd9ff;
-  --cyan-dim:#3c6b7d;
-  --red:#ff5d5d;
-  --panel-bg:rgba(8,10,16,0.72);
-  --panel-border:rgba(127,217,255,0.25);
-  --text:#dbe7ef;
-  --text-dim:#7488a0;
+:root {
+  /* ---- Color Palette Tokens ---- */
+  --bg: #05060a;
+  --amber: #ffb454;
+  --amber-dim: #a06a2c;
+  --cyan: #7fd9ff;
+  --cyan-dim: #3c6b7d;
+  --red: #ff5d5d;
+  --panel-bg: rgba(8, 10, 16, 0.72);
+  --panel-border: rgba(127, 217, 255, 0.25);
+  --text: #dbe7ef;
+  --text-dim: #7488a0;
 
-  /* ---- typography ---- */
-  --mono:'JetBrains Mono', monospace;
-  --display:'Space Grotesk', sans-serif;
+  /* ---- Typography Tokens ---- */
+  --mono: 'JetBrains Mono', monospace;
+  --display: 'Space Grotesk', sans-serif;
 
-  /* ---- spacing scale ---- */
-  --sp-xs:4px;
-  --sp-sm:8px;
-  --sp-md:12px;
-  --sp-lg:16px;
+  /* ---- Spacing Scale Tokens ---- */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 12px;
+  --sp-lg: 16px;
 
-  /* ---- component tokens ---- */
-  --control-height:32px;  /* unified minimum height for buttons / toggles */
-  --panel-pad:12px;       /* consistent inner padding on panel sections   */
-  --section-gap:10px;     /* vertical gap between controls in a section   */
-}
-
-/* ---- global reset ---- */
-*{box-sizing:border-box;}
-html,body{
-  margin:0;padding:0;width:100%;height:100%;
-  background:var(--bg);overflow:hidden;
-  font-family:var(--mono);color:var(--text);
+  /* ---- Component Layout Metrics ---- */
+  --control-height: 32px;  /* Standard minimum height for buttons and toggles */
+  --panel-pad: 12px;       /* Consistent internal panel padding */
+  --section-gap: 10px;     /* Vertical gap between adjacent section controls */
 }
 
 /* ==========================================================================
-   CANVAS & CRT OVERLAY
+   GLOBAL RESET & BASE ELEMENTS
    ========================================================================== */
-#scene{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;}
 
-#crt-overlay{
-  position:fixed;inset:0;pointer-events:none;z-index:5;
-  background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
-  mix-blend-mode:multiply;
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  font-family: var(--mono);
+  color: var(--text);
 }
 
 /* ==========================================================================
-   TOP BAR — brand, mission clock, action buttons
+   WEBGL CANVAS & CRT POST-PROCESSING OVERLAY
    ========================================================================== */
-#topbar{
-  position:fixed;top:0;left:0;right:0;height:52px;z-index:20;
-  display:grid;grid-template-columns:1fr auto 1fr;
-  align-items:center;
-  padding:0 18px;
-  background:linear-gradient(to bottom, rgba(5,6,10,0.9), rgba(5,6,10,0));
-  pointer-events:none;
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
 }
 
-/* ---- brand / logo ---- */
-.brand{display:flex;align-items:center;gap:var(--sp-md);pointer-events:auto;}
-.brand-mark{color:var(--amber);text-shadow:0 0 12px var(--amber);font-size:14px;}
-.brand-text{display:flex;flex-direction:column;line-height:1.1;}
-.brand-title{
-  font-family:var(--display);font-weight:700;
-  letter-spacing:3px;font-size:15px;color:var(--text);
-}
-.brand-sub{font-size:9px;letter-spacing:2px;color:var(--cyan);opacity:0.8;}
-
-/* ---- mission clock ----
-   Must fit within the 52px topbar. Four stacked lines: label, time,
-   label, years. tabular-nums prevents horizontal jitter on updates.  */
-.sim-clock{
-  display:flex;flex-direction:column;align-items:center;
-  min-width:150px;text-align:center;
-  pointer-events:auto;
-}
-.clock-label{
-  font-size:7.5px;letter-spacing:2px;color:var(--text-dim);
-  line-height:1.1;
-}
-.clock-label-2{
-  margin-top:2px;
-}
-.clock-value-small{
-  font-size:9.5px;color:var(--cyan);letter-spacing:1px;
-  font-variant-numeric:tabular-nums;
-  line-height:1.2;
-}
-#clock-value{
-  font-size:14px;color:var(--amber);letter-spacing:2px;
-  text-shadow:0 0 8px rgba(255,180,84,0.5);
-  font-variant-numeric:tabular-nums;
-  line-height:1.2;
-}
-
-/* ---- topbar action buttons ---- */
-.topbar-actions{pointer-events:auto;display:flex;gap:var(--sp-sm);justify-self:end;}
-.ghost-btn{
-  width:26px;height:26px;border-radius:50%;
-  background:transparent;border:1px solid var(--panel-border);
-  color:var(--cyan);cursor:pointer;font-family:var(--mono);
-  transition:background 0.15s;
-}
-.ghost-btn:hover{background:rgba(127,217,255,0.1);}
-
-/* ==========================================================================
-   PANELS — shared base styling
-   ========================================================================== */
-.panel{
-  background:var(--panel-bg);
-  border:1px solid var(--panel-border);
-  backdrop-filter:blur(6px);
-  box-shadow:0 0 24px rgba(0,0,0,0.5), inset 0 0 40px rgba(127,217,255,0.03);
-  pointer-events:auto;
-}
-.panel-head{
-  display:flex;justify-content:space-between;align-items:center;
-  padding:7px var(--panel-pad);font-size:10px;letter-spacing:2px;color:var(--cyan);
-  border-bottom:1px solid var(--panel-border);
-  font-family:var(--display);font-weight:600;
-}
-.corner{
-  width:8px;height:8px;
-  border-top:2px solid var(--amber);border-right:2px solid var(--amber);
+#crt-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.55) 100%);
+  mix-blend-mode: multiply;
 }
 
 /* ==========================================================================
-   CONTROL DECK (left panel)
+   TOPBAR NAVIGATION, MISSION CLOCK & ACTION BAR
    ========================================================================== */
-#control-deck{
-  position:fixed;top:64px;left:14px;width:250px;
-  max-height:calc(100vh - 90px);
-  overflow-y:auto;overflow-x:hidden;
-  z-index:15;
+
+#topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 18px;
+  background: linear-gradient(to bottom, rgba(5, 6, 10, 0.9), rgba(5, 6, 10, 0));
+  pointer-events: none;
+}
+
+/* ---- Observatory Branding ---- */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-md);
+  pointer-events: auto;
+}
+
+.brand-mark {
+  color: var(--amber);
+  text-shadow: 0 0 12px var(--amber);
+  font-size: 14px;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brand-title {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: 3px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.brand-sub {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  opacity: 0.8;
+}
+
+/* ---- Central Simulation Clock ---- */
+.sim-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 150px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.clock-label {
+  font-size: 7.5px;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  line-height: 1.1;
+}
+
+.clock-label-2 {
+  margin-top: 2px;
+}
+
+.clock-value-small {
+  font-size: 9.5px;
+  color: var(--cyan);
+  letter-spacing: 1px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+#clock-value {
+  font-size: 14px;
+  color: var(--amber);
+  letter-spacing: 2px;
+  text-shadow: 0 0 8px rgba(255, 180, 84, 0.5);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+/* ---- Topbar Action Buttons ---- */
+.topbar-actions {
+  pointer-events: auto;
+  display: flex;
+  gap: var(--sp-sm);
+  justify-self: end;
+}
+
+.ghost-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--cyan);
+  cursor: pointer;
+  font-family: var(--mono);
+  transition: background 0.15s;
+}
+
+.ghost-btn:hover {
+  background: rgba(127, 217, 255, 0.1);
 }
 
 /* ==========================================================================
-   RIGHT DECK (info + log)
+   GENERIC PANEL CONTAINER STYLES
    ========================================================================== */
-#right-deck{
-  position:fixed;top:64px;right:14px;width:260px;
-  max-height:calc(100vh - 90px);
-  overflow-y:auto;overflow-x:hidden;
-  display:flex;flex-direction:column;gap:var(--panel-pad);
-  z-index:15;
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.5), inset 0 0 40px rgba(127, 217, 255, 0.03);
+  pointer-events: auto;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px var(--panel-pad);
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  border-bottom: 1px solid var(--panel-border);
+  font-family: var(--display);
+  font-weight: 600;
+}
+
+.corner {
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--amber);
+  border-right: 2px solid var(--amber);
 }
 
 /* ==========================================================================
-   PANEL SECTIONS — the main layout container for groups of controls.
-   Flexbox column + gap replaces per-child margin hacks and eliminates
-   the "TRAILS toggle overlaps Trail Length" bug entirely.
+   PRIMARY DOCKING PANELS (CONTROL DECK & RIGHT DECK)
    ========================================================================== */
-.panel-section{
-  padding:var(--panel-pad);
-  border-bottom:1px solid rgba(127,217,255,0.08);
-  display:flex;
-  flex-direction:column;
-  gap:var(--section-gap);
+
+#control-deck {
+  position: fixed;
+  top: 64px;
+  left: 14px;
+  width: 250px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 15;
 }
-.section-title{
-  font-size:9px;letter-spacing:2px;color:var(--amber);opacity:0.85;
-  /* no margin needed — parent gap handles spacing */
+
+#right-deck {
+  position: fixed;
+  top: 64px;
+  right: 14px;
+  width: 260px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-pad);
+  z-index: 15;
 }
 
 /* ==========================================================================
-   SLIDER ROWS — label + value on top line, range input spanning full width
+   PANEL SECTIONS & CONTROL ROWS
    ========================================================================== */
-.slider-row{
-  display:grid;grid-template-columns:1fr auto;align-items:center;
-  font-size:9px;letter-spacing:1px;color:var(--text-dim);
-  /* no margin — parent flex gap handles spacing */
+
+.panel-section {
+  padding: var(--panel-pad);
+  border-bottom: 1px solid rgba(127, 217, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
 }
-.slider-row > span{
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+
+.section-title {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--amber);
+  opacity: 0.85;
 }
-.slider-row .val{
-  color:var(--text);justify-self:end;
-  min-width:38px;text-align:right;
-  font-variant-numeric:tabular-nums;
+
+/* ---- Slider Form Rows ---- */
+.slider-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
 }
-.slider-row input[type=range]{
-  grid-column:1 / span 2;margin-top:5px;
-  -webkit-appearance:none;appearance:none;
-  width:100%;height:2px;
-  background:var(--panel-border);border-radius:2px;outline:none;
+
+.slider-row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.slider-row input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none;width:11px;height:11px;
-  border-radius:50%;background:var(--amber);
-  box-shadow:0 0 6px var(--amber);cursor:pointer;
+
+.slider-row .val {
+  color: var(--text);
+  justify-self: end;
+  min-width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
-.slider-row input[type=range]::-moz-range-thumb{
-  width:11px;height:11px;border:none;border-radius:50%;
-  background:var(--amber);box-shadow:0 0 6px var(--amber);cursor:pointer;
+
+.slider-row input[type=range] {
+  grid-column: 1 / span 2;
+  margin-top: 5px;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  background: var(--panel-border);
+  border-radius: 2px;
+  outline: none;
+}
+
+.slider-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+  cursor: pointer;
+}
+
+.slider-row input[type=range]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: none;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 6px var(--amber);
+  cursor: pointer;
+}
+
+/* ---- Simulation Speed Preset Grid ---- */
+.time-buttons {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--sp-xs);
+}
+
+/* ---- Accessibility Focus Rings ---- */
+button, input {
+  outline: none;
+}
+
+button:focus-visible, input:focus-visible, .ghost-btn:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 1px;
+  border-radius: 2px;
 }
 
 /* ==========================================================================
-   TIME BUTTONS (grid of speed presets)
+   INTERACTIVE BUTTONS & TOGGLES
    ========================================================================== */
-.time-buttons{
-  display:grid;grid-template-columns:repeat(5,1fr);gap:var(--sp-xs);
-  /* no margin — parent flex gap handles spacing */
+
+.tbtn {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 5px 0;
+  min-height: 28px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: border-color 0.15s, color 0.15s;
 }
 
-/* ---- focus ring ---- */
-button,input{outline:none;}
-button:focus-visible,input:focus-visible,.ghost-btn:focus-visible{
-  outline:1px solid var(--cyan);outline-offset:1px;border-radius:2px;
+.tbtn:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.tbtn.active {
+  background: rgba(255, 180, 84, 0.12);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.tbtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tbtn:disabled:hover {
+  border-color: var(--panel-border);
+  color: var(--text-dim);
+}
+
+.wide-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: var(--sp-sm);
+  min-height: var(--control-height);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.wide-btn:hover:not(:disabled) {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(127, 217, 255, 0.06);
+}
+
+.wide-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.wide-btn.accent {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.wide-btn.accent:hover {
+  background: rgba(255, 180, 84, 0.12);
+}
+
+.wide-btn.danger {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.wide-btn.danger:hover {
+  background: rgba(255, 93, 93, 0.12);
+}
+
+/* Binary state toggle buttons */
+.wide-btn.active-toggle {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(127, 217, 255, 0.08);
+}
+
+.wide-btn.active-toggle.off {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(255, 93, 93, 0.08);
+}
+
+.panel-hint {
+  padding: var(--panel-pad);
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.5;
 }
 
 /* ==========================================================================
-   BUTTONS — .tbtn (compact grid), .wide-btn (full-width actions)
-   Unified min-height ensures every button has equal visual weight.
+   CAMERA CONTROLS & PERSISTENCE ROWS
    ========================================================================== */
-.tbtn{
-  background:transparent;border:1px solid var(--panel-border);color:var(--text-dim);
-  font-family:var(--mono);font-size:10px;
-  padding:5px 0;min-height:28px;
-  cursor:pointer;border-radius:2px;
-  transition:border-color 0.15s, color 0.15s;
-}
-.tbtn:hover{border-color:var(--cyan);color:var(--cyan);}
-.tbtn.active{background:rgba(255,180,84,0.12);border-color:var(--amber);color:var(--amber);}
-.tbtn:disabled{opacity:0.35;cursor:not-allowed;}
-.tbtn:disabled:hover{border-color:var(--panel-border);color:var(--text-dim);}
 
-.wide-btn{
-  width:100%;background:transparent;
-  border:1px solid var(--panel-border);color:var(--text);
-  font-family:var(--mono);font-size:10px;letter-spacing:1px;
-  padding:var(--sp-sm);
-  min-height:var(--control-height);
-  cursor:pointer;border-radius:2px;
-  transition:border-color 0.15s, color 0.15s, background 0.15s;
-  /* no margin — parent flex gap handles spacing */
-}
-.wide-btn:hover:not(:disabled){
-  border-color:var(--cyan);color:var(--cyan);
-  background:rgba(127,217,255,0.06);
-}
-.wide-btn:disabled{opacity:0.35;cursor:not-allowed;}
-.wide-btn.accent{border-color:var(--amber);color:var(--amber);}
-.wide-btn.accent:hover{background:rgba(255,180,84,0.12);}
-.wide-btn.danger{border-color:var(--red);color:var(--red);}
-.wide-btn.danger:hover{background:rgba(255,93,93,0.12);}
-
-/* toggle-style buttons (gravity on/off, trails on/off) */
-.wide-btn.active-toggle{
-  border-color:var(--cyan);color:var(--cyan);
-  background:rgba(127,217,255,0.08);
-}
-.wide-btn.active-toggle.off{
-  border-color:var(--red);color:var(--red);
-  background:rgba(255,93,93,0.08);
+.cam-mode-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-xs);
 }
 
-/* ---- panel hint at bottom of control deck ---- */
-.panel-hint{
-  padding:var(--panel-pad);font-size:9px;
-  color:var(--text-dim);line-height:1.5;
+.save-load-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-xs);
+}
+
+#save-status {
+  font-size: 9px;
+  color: var(--cyan);
+  letter-spacing: 1px;
+  min-height: 11px;
+  opacity: 0.85;
 }
 
 /* ==========================================================================
-   CAMERA MODE BUTTONS & SAVE/LOAD ROW
+   PHYSICS TELEMETRY DEBUG HUD
    ========================================================================== */
-.cam-mode-buttons{
-  display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-xs);
-  /* no margin — parent flex gap handles spacing */
+
+#debug-hud {
+  position: fixed;
+  top: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 230px;
+  z-index: 22;
 }
-.save-load-row{
-  display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-xs);
-  /* no margin — parent flex gap handles spacing */
+
+.debug-body {
+  padding: var(--sp-sm) var(--panel-pad);
 }
-.save-load-row .wide-btn{/* inherit parent — no extra margin */}
-#save-status{
-  font-size:9px;color:var(--cyan);letter-spacing:1px;
-  min-height:11px;opacity:0.85;
-  /* no margin — parent flex gap handles spacing */
+
+.debug-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  padding: 3px 0;
+  border-bottom: 1px dashed rgba(127, 217, 255, 0.08);
+}
+
+.debug-row span {
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 6px;
+}
+
+.debug-row b {
+  color: var(--cyan);
+  font-weight: 500;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-row.divider {
+  border-bottom: none;
+  margin-top: var(--sp-xs);
+  padding-top: 6px;
+  border-top: 1px solid rgba(127, 217, 255, 0.15);
+}
+
+.debug-row.divider span {
+  color: var(--amber);
+  letter-spacing: 2px;
+  font-size: 9px;
+}
+
+.debug-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 3px 0;
+  cursor: pointer;
+}
+
+.debug-check:hover {
+  color: var(--text);
+}
+
+.debug-check input {
+  accent-color: var(--cyan);
+  width: 12px;
+  height: 12px;
+  cursor: pointer;
 }
 
 /* ==========================================================================
-   PHYSICS DEBUG HUD (centered overlay)
+   HIERARCHICAL BREADCRUMB INDICATOR
    ========================================================================== */
-#debug-hud{
-  position:fixed;top:90px;left:50%;transform:translateX(-50%);
-  width:230px;z-index:22;
-}
-.debug-body{padding:var(--sp-sm) var(--panel-pad);}
-.debug-row{
-  display:flex;justify-content:space-between;
-  font-size:9.5px;padding:3px 0;
-  border-bottom:1px dashed rgba(127,217,255,0.08);
-}
-.debug-row span{
-  color:var(--text-dim);letter-spacing:1px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  margin-right:6px;
-}
-.debug-row b{
-  color:var(--cyan);font-weight:500;flex-shrink:0;
-  font-variant-numeric:tabular-nums;
-}
-.debug-row.divider{
-  border-bottom:none;margin-top:var(--sp-xs);padding-top:6px;
-  border-top:1px solid rgba(127,217,255,0.15);
-}
-.debug-row.divider span{color:var(--amber);letter-spacing:2px;font-size:9px;}
-.debug-check{
-  display:flex;align-items:center;gap:7px;
-  font-size:10px;color:var(--text-dim);padding:3px 0;cursor:pointer;
-}
-.debug-check:hover{color:var(--text);}
-.debug-check input{accent-color:var(--cyan);width:12px;height:12px;cursor:pointer;}
 
-/* ==========================================================================
-   BREADCRUMB BAR (navigation depth indicator)
-   Sits flush under the topbar, visually connected to the clock above.
-   ========================================================================== */
-#breadcrumb-bar{
-  position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:19;
-  font-size:9px;letter-spacing:2px;color:var(--cyan);opacity:0.85;
-  pointer-events:none;
-  background:rgba(8,10,16,0.65);padding:3px 16px;
-  border:1px solid var(--panel-border);border-top:none;
-  border-radius:0 0 4px 4px;
-  white-space:nowrap;max-width:80vw;overflow:hidden;text-overflow:ellipsis;
-  font-variant-numeric:tabular-nums;
-  font-family:var(--display);font-weight:600;
+#breadcrumb-bar {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 19;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  opacity: 0.85;
+  pointer-events: none;
+  background: rgba(8, 10, 16, 0.65);
+  padding: 3px 16px;
+  border: 1px solid var(--panel-border);
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  white-space: nowrap;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--display);
+  font-weight: 600;
 }
 
 /* ==========================================================================
-   PLACEMENT PANEL (create / drag-launch flow)
+   PLACEMENT & DRAG-LAUNCH CONFIGURATION PANEL
    ========================================================================== */
-#placement-panel{
-  position:fixed;left:50%;bottom:18px;transform:translateX(-50%);
-  width:300px;z-index:25;
+
+#placement-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: 300px;
+  z-index: 25;
 }
-.placement-body{
-  padding:var(--panel-pad);
-  display:flex;flex-direction:column;gap:var(--section-gap);
+
+.placement-body {
+  padding: var(--panel-pad);
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
 }
-.text-row{
-  display:flex;flex-direction:column;gap:var(--sp-xs);
-  font-size:9px;letter-spacing:1px;color:var(--text-dim);
+
+.text-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
 }
-.text-row input[type=text]{
-  background:rgba(127,217,255,0.06);border:1px solid var(--panel-border);
-  color:var(--text);font-family:var(--mono);font-size:11px;
-  padding:6px var(--sp-sm);border-radius:2px;outline:none;
+
+.text-row input[type=text] {
+  background: rgba(127, 217, 255, 0.06);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px var(--sp-sm);
+  border-radius: 2px;
+  outline: none;
 }
-.text-row input[type=text]:focus{border-color:var(--cyan);}
-.placement-hint{
-  font-size:9px;line-height:1.5;color:var(--text-dim);
+
+.text-row input[type=text]:focus {
+  border-color: var(--cyan);
+}
+
+.placement-hint {
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
 /* ==========================================================================
-   OBJECT BROWSER (collapsible list on the right)
+   HIERARCHICAL OBJECT BROWSER TREE
    ========================================================================== */
-.browser-toggle{cursor:pointer;user-select:none;}
-.browser-toggle:hover{color:var(--cyan);}
-#browser-count{color:var(--text-dim);font-weight:400;}
-.browser-chevron{display:inline-block;transition:transform 0.15s;color:var(--amber);}
-#browser-panel:not(.collapsed) .browser-chevron{transform:rotate(90deg);}
-#browser-panel.collapsed .browser-body{display:none;}
-.browser-body{max-height:200px;overflow-y:auto;padding:var(--sp-xs) 0;}
-.browser-group{
-  font-size:9px;letter-spacing:2px;color:var(--amber);
-  padding:7px var(--panel-pad) 3px;opacity:0.85;
+
+.browser-toggle {
+  cursor: pointer;
+  user-select: none;
 }
-.browser-item{
-  padding:var(--sp-xs) var(--panel-pad);cursor:pointer;
-  color:var(--text);font-size:10.5px;
-  border-bottom:1px dashed rgba(127,217,255,0.06);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+
+.browser-toggle:hover {
+  color: var(--cyan);
 }
-.browser-item:hover{background:rgba(127,217,255,0.08);color:var(--cyan);}
-.browser-empty{padding:var(--sp-sm) var(--panel-pad);color:var(--text-dim);font-size:10px;}
-.browser-body::-webkit-scrollbar{width:4px;}
-.browser-body::-webkit-scrollbar-thumb{background:var(--cyan-dim);}
+
+#browser-count {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.browser-chevron {
+  display: inline-block;
+  transition: transform 0.15s;
+  color: var(--amber);
+}
+
+#browser-panel:not(.collapsed) .browser-chevron {
+  transform: rotate(90deg);
+}
+
+#browser-panel.collapsed .browser-body {
+  display: none;
+}
+
+.browser-body {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: var(--sp-xs) 0;
+}
+
+.browser-group {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--amber);
+  padding: 7px var(--panel-pad) 3px;
+  opacity: 0.85;
+}
+
+.browser-item {
+  padding: var(--sp-xs) var(--panel-pad);
+  cursor: pointer;
+  color: var(--text);
+  font-size: 10.5px;
+  border-bottom: 1px dashed rgba(127, 217, 255, 0.06);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-item:hover {
+  background: rgba(127, 217, 255, 0.08);
+  color: var(--cyan);
+}
+
+.browser-empty {
+  padding: var(--sp-sm) var(--panel-pad);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.browser-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.browser-body::-webkit-scrollbar-thumb {
+  background: var(--cyan-dim);
+}
 
 /* ==========================================================================
-   INFO PANEL (selected object details)
+   ASTRONOMICAL TELEMETRY INSPECTOR PANEL
    ========================================================================== */
-.info-body{
-  padding:var(--panel-pad);
-  overflow-wrap:break-word;word-break:break-word;
+
+.info-body {
+  padding: var(--panel-pad);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
-.info-row{
-  display:flex;justify-content:space-between;
-  font-size:10px;padding:var(--sp-xs) 0;
-  border-bottom:1px dashed rgba(127,217,255,0.08);
-  gap:var(--sp-sm);
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  padding: var(--sp-xs) 0;
+  border-bottom: 1px dashed rgba(127, 217, 255, 0.08);
+  gap: var(--sp-sm);
 }
-.info-row span{
-  color:var(--text-dim);letter-spacing:1px;
-  white-space:nowrap;flex-shrink:0;
+
+.info-row span {
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
-.info-row b{
-  color:var(--amber);font-weight:500;
-  text-align:right;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  font-variant-numeric:tabular-nums;
+
+.info-row b {
+  color: var(--amber);
+  font-weight: 500;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-#info-panel .info-body{padding-bottom:var(--sp-xs);}
-#btn-delete-obj, #btn-enter-system{
-  margin:var(--sp-sm) var(--panel-pad) 0;
-  width:calc(100% - var(--panel-pad) * 2);
+
+#info-panel .info-body {
+  padding-bottom: var(--sp-xs);
 }
-#btn-delete-obj{margin-bottom:var(--panel-pad);}
+
+#btn-delete-obj, #btn-enter-system {
+  margin: var(--sp-sm) var(--panel-pad) 0;
+  width: calc(100% - var(--panel-pad) * 2);
+}
+
+#btn-delete-obj {
+  margin-bottom: var(--panel-pad);
+}
 
 /* ==========================================================================
-   EVENT LOG PANEL
-   • Improved spacing between entries for readability
-   • padding-right prevents text from touching the scrollbar
-   • word-wrap handles long event messages cleanly
+   ASTRONOMICAL EVENT LOG
    ========================================================================== */
-#log-panel{flex:1;display:flex;flex-direction:column;min-height:150px;}
-#log-body{
-  flex:1;overflow-y:auto;
-  padding:var(--sp-sm) var(--panel-pad);
-  padding-right:var(--sp-lg);       /* extra breathing room from scrollbar */
-  font-size:9.5px;line-height:1.7;
-  color:var(--text-dim);
-  overflow-wrap:break-word;
-  word-break:break-word;
+
+#log-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
 }
-.log-entry{
-  margin-bottom:var(--sp-sm);
-  padding-bottom:var(--sp-xs);
-  border-bottom:1px solid rgba(127,217,255,0.04);
+
+#log-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-sm) var(--panel-pad);
+  padding-right: var(--sp-lg);
+  font-size: 9.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
-.log-entry:last-child{border-bottom:none;}
-.log-time{
-  color:var(--cyan);margin-right:var(--sp-sm);
-  letter-spacing:1px;font-weight:500;
-  font-variant-numeric:tabular-nums;
+
+.log-entry {
+  margin-bottom: var(--sp-sm);
+  padding-bottom: var(--sp-xs);
+  border-bottom: 1px solid rgba(127, 217, 255, 0.04);
 }
-.log-entry.event-critical{color:var(--red);}
-.log-entry.event-info{color:var(--text);}
-.log-entry.clickable{
-  cursor:pointer;border-radius:2px;
-  padding:2px var(--sp-xs);
-  margin:0 calc(-1 * var(--sp-xs)) var(--sp-sm);
+
+.log-entry:last-child {
+  border-bottom: none;
 }
-.log-entry.clickable:hover{background:rgba(127,217,255,0.1);}
-.log-entry.clickable:hover .log-time{text-decoration:underline;}
+
+.log-time {
+  color: var(--cyan);
+  margin-right: var(--sp-sm);
+  letter-spacing: 1px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-entry.event-critical {
+  color: var(--red);
+}
+
+.log-entry.event-info {
+  color: var(--text);
+}
+
+.log-entry.clickable {
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 2px var(--sp-xs);
+  margin: 0 calc(-1 * var(--sp-xs)) var(--sp-sm);
+}
+
+.log-entry.clickable:hover {
+  background: rgba(127, 217, 255, 0.1);
+}
+
+.log-entry.clickable:hover .log-time {
+  text-decoration: underline;
+}
 
 /* ==========================================================================
-   SCROLLBARS
+   CUSTOM SCROLLBARS
    ========================================================================== */
+
 #control-deck::-webkit-scrollbar,
-#log-body::-webkit-scrollbar{width:4px;}
+#log-body::-webkit-scrollbar {
+  width: 4px;
+}
+
 #control-deck::-webkit-scrollbar-thumb,
-#log-body::-webkit-scrollbar-thumb{background:var(--cyan-dim);}
-
-/* ==========================================================================
-   CONTEXT MENU (right-click spawn)
-   ========================================================================== */
-#context-menu{
-  position:fixed;z-index:40;
-  background:var(--panel-bg);border:1px solid var(--panel-border);
-  backdrop-filter:blur(6px);min-width:190px;
-  box-shadow:0 0 24px rgba(0,0,0,0.6);
-}
-.ctx-item{
-  padding:9px 14px;font-size:10.5px;letter-spacing:1px;
-  cursor:pointer;color:var(--text);
-  transition:background 0.12s, color 0.12s;
-}
-.ctx-item:hover{background:rgba(127,217,255,0.1);color:var(--cyan);}
-
-/* ==========================================================================
-   MODALS (help overlay)
-   ========================================================================== */
-.modal{
-  position:fixed;inset:0;z-index:50;
-  display:flex;align-items:center;justify-content:center;
-  background:rgba(2,3,6,0.6);
-}
-.modal-box{width:300px;padding-bottom:14px;}
-.modal-box .slider-row{padding:0 14px;margin-top:var(--panel-pad);}
-.modal-actions{display:flex;gap:var(--sp-sm);padding:var(--sp-xs) 14px 0;}
-.help-body{
-  padding:14px var(--sp-lg);font-size:11px;line-height:1.9;
-  color:var(--text-dim);
-  overflow-wrap:break-word;word-break:break-word;
-}
-.help-body b{color:var(--amber);}
-#btn-help-close{margin:0 var(--sp-lg) var(--sp-xs);width:calc(100% - var(--sp-lg) * 2);}
-
-/* ==========================================================================
-   NOTIFICATION BANNER
-   ========================================================================== */
-#notify-banner{
-  position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:30;
-  background:rgba(8,10,16,0.85);border:1px solid var(--red);color:var(--red);
-  padding:9px 22px;font-size:11px;letter-spacing:2px;
-  font-family:var(--display);font-weight:600;
-  box-shadow:0 0 20px rgba(255,93,93,0.35);
-  white-space:nowrap;
+#log-body::-webkit-scrollbar-thumb {
+  background: var(--cyan-dim);
 }
 
 /* ==========================================================================
-   UTILITY
+   RADIAL CONTEXT SPAWN MENU
    ========================================================================== */
-.hidden{display:none !important;}
+
+#context-menu {
+  position: fixed;
+  z-index: 40;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(6px);
+  min-width: 190px;
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
+}
+
+.ctx-item {
+  padding: 9px 14px;
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.12s, color 0.12s;
+}
+
+.ctx-item:hover {
+  background: rgba(127, 217, 255, 0.1);
+  color: var(--cyan);
+}
 
 /* ==========================================================================
-   RESPONSIVE BREAKPOINTS
+   MODAL DIALOGS
    ========================================================================== */
 
-/* ---- medium-large: slight squeeze for 1366px-class displays ---- */
-@media (max-width:1400px){
-  #control-deck{width:235px;}
-  #right-deck{width:250px;}
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 3, 6, 0.6);
 }
 
-/* ---- medium: tighter for 1280px-class displays ---- */
-@media (max-width:1300px){
-  #control-deck{width:220px;}
-  #right-deck{width:240px;}
+.modal-box {
+  width: 300px;
+  padding-bottom: 14px;
 }
 
-/* ---- tablet-ish ---- */
-@media (max-width:820px){
-  #control-deck{width:44vw;font-size:12px;}
-  #right-deck{width:48vw;}
-  .brand-sub{display:none;}
-  .panel-hint{display:none;}
+.modal-box .slider-row {
+  padding: 0 14px;
+  margin-top: var(--panel-pad);
 }
 
-/* ---- narrow ---- */
-@media (max-width:560px){
-  #control-deck,#right-deck{top:58px;max-height:38vh;}
-  #right-deck{bottom:auto;}
+.modal-actions {
+  display: flex;
+  gap: var(--sp-sm);
+  padding: var(--sp-xs) 14px 0;
+}
+
+.help-body {
+  padding: 14px var(--sp-lg);
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--text-dim);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.help-body b {
+  color: var(--amber);
+}
+
+#btn-help-close {
+  margin: 0 var(--sp-lg) var(--sp-xs);
+  width: calc(100% - var(--sp-lg) * 2);
+}
+
+/* ==========================================================================
+   HEADS-UP NOTIFICATION BANNER
+   ========================================================================== */
+
+#notify-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: rgba(8, 10, 16, 0.85);
+  border: 1px solid var(--red);
+  color: var(--red);
+  padding: 9px 22px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  font-family: var(--display);
+  font-weight: 600;
+  box-shadow: 0 0 20px rgba(255, 93, 93, 0.35);
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   VISIBILITY UTILITIES
+   ========================================================================== */
+
+.hidden {
+  display: none !important;
+}
+
+/* ==========================================================================
+   RESPONSIVE MEDIA BREAKPOINTS
+   ========================================================================== */
+
+/* Compact Desktop (e.g. 1366x768) */
+@media (max-width: 1400px) {
+  #control-deck {
+    width: 235px;
+  }
+  #right-deck {
+    width: 250px;
+  }
+}
+
+/* Small Desktop / Laptop (e.g. 1280x720) */
+@media (max-width: 1300px) {
+  #control-deck {
+    width: 220px;
+  }
+  #right-deck {
+    width: 240px;
+  }
+}
+
+/* Tablet Viewports */
+@media (max-width: 820px) {
+  #control-deck {
+    width: 44vw;
+    font-size: 12px;
+  }
+  #right-deck {
+    width: 48vw;
+  }
+  .brand-sub {
+    display: none;
+  }
+  .panel-hint {
+    display: none;
+  }
+}
+
+/* Mobile Viewports */
+@media (max-width: 560px) {
+  #control-deck, #right-deck {
+    top: 58px;
+    max-height: 38vh;
+  }
+  #right-deck {
+    bottom: auto;
+  }
 }
