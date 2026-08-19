@@ -18,6 +18,7 @@ export const CONFIG = {
   asteroidCount: 400,        // Active asteroid particle capacity
   diskBrightness: 1.0,       // Accretion disk shader intensity multiplier
   lensStrength: 1.0,         // Gravitational lensing post-processing distortion strength
+  lensingEnabled: true,      // Master gravitational lensing post-processing switch
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch
@@ -37,6 +38,9 @@ export const CONFIG = {
 /* ============================================================================
    ASTROPHYSICAL AND NUMERICAL CONSTANTS
    ============================================================================ */
+
+/** Maximum number of active black hole gravitational lenses evaluated in the screen-space shader */
+export const MAX_LENSES = 8;
 
 /** Relativistic reference speed of light constant (simulation velocity units: u/s) */
 export const C_SIM = 60;
@@ -191,4 +195,5 @@ export const state = {
   lastAsteroidMs: 0,
   lastSubsteps: 1,
   fpsSmoothed: 60,
+  activeLensesCount: 0,
 };

@@ -14,6 +14,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { makeGlowTexture, starGlowTex } from './textures.js';
+import { MAX_LENSES } from './state.js';
 
 /* ============================================================================
    RENDERER, SCENE, CAMERA, CONTROLS, AND LIGHTS
@@ -271,16 +272,23 @@ export const bloomPass = new UnrealBloomPass(
 composer.addPass(bloomPass);
 
 /**
- * Screen-space gravitational lensing shader.
- * Approximates light deflection around the projected Schwarzschild singularity
- * using an exponential radial displacement map.
+ * Screen-space multi-singularity gravitational lensing shader.
+ * Implements thin-lens Schwarzschild light deflection, Einstein-ring formation,
+ * and multi-singularity vector superposition for up to MAX_LENSES active black holes.
  */
 const lensShader = {
   uniforms: {
     tDiffuse: { value: null },
-    uBH: { value: new THREE.Vector2(0.5, 0.5) },
+    uLensCount: { value: 0 },
+    uLensPos: {
+      value: Array.from({ length: MAX_LENSES }, () => new THREE.Vector2(0.5, 0.5)),
+    },
+    uEinsteinRadius: { value: new Float32Array(MAX_LENSES) },
+    uShadowRadius: { value: new Float32Array(MAX_LENSES) },
+    uCutoffRadius: { value: new Float32Array(MAX_LENSES) },
     uStrength: { value: 1.0 },
     uAspect: { value: window.innerWidth / window.innerHeight },
+    uLensingEnabled: { value: true },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -291,24 +299,65 @@ const lensShader = {
   `,
   fragmentShader: `
     uniform sampler2D tDiffuse;
-    uniform vec2 uBH;
+    uniform int uLensCount;
+    uniform vec2 uLensPos[${MAX_LENSES}];
+    uniform float uEinsteinRadius[${MAX_LENSES}];
+    uniform float uShadowRadius[${MAX_LENSES}];
+    uniform float uCutoffRadius[${MAX_LENSES}];
     uniform float uStrength;
     uniform float uAspect;
+    uniform bool uLensingEnabled;
     varying vec2 vUv;
 
     void main() {
-      // Aspect-ratio corrected displacement vector from screen-space singularity
-      vec2 diff = vUv - uBH;
-      diff.x *= uAspect;
-      float dist = length(diff);
-      vec2 dirn = dist > 0.0001 ? normalize(diff) : vec2(0.0);
+      if (!uLensingEnabled || uStrength <= 0.001 || uLensCount <= 0) {
+        gl_FragColor = texture2D(tDiffuse, vUv);
+        return;
+      }
 
-      // Deflection angle falls off exponentially with screen-space distance
-      float bend = uStrength * 0.09 * exp(-dist * 9.0);
-      vec2 offset = dirn * bend;
-      offset.x /= uAspect;
+      vec2 aspectUv = vec2(vUv.x * uAspect, vUv.y);
+      vec2 netDeflection = vec2(0.0);
+      float minShadowMask = 1.0;
 
-      gl_FragColor = texture2D(tDiffuse, clamp(vUv - offset, 0.0, 1.0));
+      for (int i = 0; i < ${MAX_LENSES}; i++) {
+        if (i >= uLensCount) break;
+
+        vec2 lensCenter = vec2(uLensPos[i].x * uAspect, uLensPos[i].y);
+        vec2 diff = aspectUv - lensCenter;
+        float theta = length(diff);
+
+        float thetaE = uEinsteinRadius[i];
+        float shadowR = uShadowRadius[i];
+        float cutoffR = uCutoffRadius[i];
+
+        if (theta > cutoffR || theta < 0.0001) continue;
+
+        vec2 dir = diff / theta;
+
+        // Schwarzschild thin-lens deflection angle: alpha(theta) = theta_E^2 / theta
+        // Softened near the horizon to avoid singularity division
+        float softTheta = max(theta, shadowR * 0.45 + 0.002);
+        float alphaMag = (thetaE * thetaE) / softTheta;
+
+        // Smooth boundary fade towards cutoff radius to eliminate edge artifacts
+        float fade = smoothstep(cutoffR, cutoffR * 0.35, theta);
+
+        // Black hole event horizon shadow preservation: mask inner shadow to prevent light smearing
+        float shadowFactor = smoothstep(shadowR * 0.75, shadowR * 1.25, theta);
+        minShadowMask = min(minShadowMask, shadowFactor);
+
+        // Multi-singularity linear deflection vector superposition
+        netDeflection += dir * (alphaMag * fade * shadowFactor * uStrength);
+      }
+
+      // Aspect-ratio corrected UV offset sampling
+      vec2 sampleOffset = vec2(netDeflection.x / uAspect, netDeflection.y);
+      vec2 sampleUv = clamp(vUv - sampleOffset, 0.0, 1.0);
+
+      vec4 sampledColor = texture2D(tDiffuse, sampleUv);
+
+      // Preserve opaque black event horizon core
+      gl_FragColor = vec4(sampledColor.rgb * minShadowMask, sampledColor.a);
     }
   `,
 };

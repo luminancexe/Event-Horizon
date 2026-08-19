@@ -46,6 +46,8 @@ export function updateDebugHud() {
   $('dbg-asteroids').textContent = state.aPos.length;
   $('dbg-fragments').textContent = state.fragments.length;
   $('dbg-gravcalcs').textContent = state.gravityCalcCount.toLocaleString();
+  const elLenses = $('dbg-lenses');
+  if (elLenses) elLenses.textContent = state.activeLensesCount ?? 0;
   $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
   $('dbg-substeps').textContent = state.lastSubsteps;
 
@@ -519,6 +521,14 @@ document.getElementById('btn-timedilation-toggle').addEventListener('click', () 
   logEvent(`Relativistic time dilation ${CONFIG.timeDilationEnabled ? 'enabled' : 'disabled'}.`, 'info');
 });
 
+document.getElementById('btn-lensing-toggle').addEventListener('click', () => {
+  CONFIG.lensingEnabled = !CONFIG.lensingEnabled;
+  const btn = document.getElementById('btn-lensing-toggle');
+  btn.textContent = CONFIG.lensingEnabled ? '\u25cf GRAVITATIONAL LENSING: ON' : '\u25cb GRAVITATIONAL LENSING: OFF';
+  btn.classList.toggle('off', !CONFIG.lensingEnabled);
+  logEvent(`Gravitational lensing ${CONFIG.lensingEnabled ? 'enabled' : 'disabled'}.`, 'info');
+});
+
 document.getElementById('btn-debug').addEventListener('click', () => {
   CONFIG.debugMode = !CONFIG.debugMode;
   document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
@@ -583,6 +593,12 @@ export function syncUIFromConfig() {
   if (tdBtn) {
     tdBtn.textContent = CONFIG.timeDilationEnabled ? '\u25cf TIME DILATION: ON' : '\u25cb TIME DILATION: OFF';
     tdBtn.classList.toggle('off', !CONFIG.timeDilationEnabled);
+  }
+
+  const lensBtn = document.getElementById('btn-lensing-toggle');
+  if (lensBtn) {
+    lensBtn.textContent = CONFIG.lensingEnabled ? '\u25cf GRAVITATIONAL LENSING: ON' : '\u25cb GRAVITATIONAL LENSING: OFF';
+    lensBtn.classList.toggle('off', !CONFIG.lensingEnabled);
   }
 
   const trailBtn = document.getElementById('btn-trails-toggle');

@@ -14,6 +14,8 @@ import * as THREE from 'three';
 import {
   CONFIG,
   state,
+  C_SIM,
+  MAX_LENSES,
   AGE_YEARS_PER_SIMSECOND,
   MAX_SUBSTEPS_BODY,
   MAX_SUBSTEPS_ASTEROID,
@@ -88,6 +90,11 @@ let perfAccum = 0;
 let perfSamples = 0;
 let perfScaled = false;
 let perfScaledTier2 = false;
+
+// Persistent scratch objects for zero-allocation multi-singularity screen projection
+const _lensNdc = new THREE.Vector3();
+const _lensCamPos = new THREE.Vector3();
+const _candidateLenses = [];
 
 /**
  * Main application loop driven by requestAnimationFrame.
@@ -232,14 +239,75 @@ function animate() {
     selectionRing.visible = velocityArrow.visible = influenceSphere.visible = false;
   }
 
-  // Gravitational lensing screen-space coordinate projection
-  const dominant = dominantBlackHole();
-  if (dominant) {
-    const ndc = dominant.mesh.position.clone().project(camera);
-    lensPass.uniforms.uBH.value.set((ndc.x + 1) / 2, (ndc.y + 1) / 2);
-    lensPass.uniforms.uStrength.value = CONFIG.lensStrength * (ndc.z < 1 ? 1 : 0);
+  // Multi-singularity gravitational lensing screen-space projection
+  if (CONFIG.lensingEnabled && CONFIG.lensStrength > 0.001) {
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const tanHalfFov = Math.tan(fovRad * 0.5);
+    const allBhs = blackHoles();
+
+    _candidateLenses.length = 0;
+
+    for (let i = 0; i < allBhs.length; i++) {
+      const bh = allBhs[i];
+      if (bh._destroyed) continue;
+
+      // Transform to camera view space: z_cam < 0 means in front of camera
+      _lensCamPos.copy(bh.mesh.position).applyMatrix4(camera.matrixWorldInverse);
+      const camDist = -_lensCamPos.z;
+
+      // Cull singularities behind or too close to the camera plane
+      if (camDist < 0.5) continue;
+
+      // Project to Normalized Device Coordinates [-1, 1]
+      _lensNdc.copy(bh.mesh.position).project(camera);
+      const uvX = (_lensNdc.x + 1) * 0.5;
+      const uvY = (_lensNdc.y + 1) * 0.5;
+
+      // Physical Schwarzschild radius & angular Einstein radius: theta_E = sqrt(2 * r_s / D_l)
+      const rs = bh.schwarzschildRadius || (2 * CONFIG.G * bh.mass) / (C_SIM * C_SIM);
+      const totalDist = Math.max(bh.mesh.position.distanceTo(camera.position), 0.5);
+      const thetaE = Math.sqrt((2 * rs) / totalDist);
+
+      // Angular screen fractions normalized to vertical FOV
+      const einsteinScreen = Math.min(Math.max((thetaE / tanHalfFov) * 0.35, 0.002), 0.5);
+      const shadowScreen = Math.min(Math.max((bh.visualRadius / totalDist) / tanHalfFov, 0.001), 0.4);
+      const cutoffScreen = Math.min(einsteinScreen * 6.5 + shadowScreen * 2.0, 1.8);
+
+      // Frustum boundary check with margin for extended distortion field
+      if (uvX < -0.4 || uvX > 1.4 || uvY < -0.4 || uvY > 1.4) continue;
+
+      _candidateLenses.push({
+        uvX,
+        uvY,
+        einsteinScreen,
+        shadowScreen,
+        cutoffScreen,
+        influence: einsteinScreen / totalDist,
+      });
+    }
+
+    // Rank candidates by apparent angular lensing influence
+    _candidateLenses.sort((a, b) => b.influence - a.influence);
+    const activeCount = Math.min(_candidateLenses.length, MAX_LENSES);
+
+    for (let i = 0; i < activeCount; i++) {
+      const c = _candidateLenses[i];
+      lensPass.uniforms.uLensPos.value[i].set(c.uvX, c.uvY);
+      lensPass.uniforms.uEinsteinRadius.value[i] = c.einsteinScreen;
+      lensPass.uniforms.uShadowRadius.value[i] = c.shadowScreen;
+      lensPass.uniforms.uCutoffRadius.value[i] = c.cutoffScreen;
+    }
+
+    lensPass.uniforms.uLensCount.value = activeCount;
+    state.activeLensesCount = activeCount;
+  } else {
+    lensPass.uniforms.uLensCount.value = 0;
+    state.activeLensesCount = 0;
   }
+
   lensPass.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
+  lensPass.uniforms.uStrength.value = CONFIG.lensStrength;
+  lensPass.uniforms.uLensingEnabled.value = CONFIG.lensingEnabled;
 
   updateDebugOverlays();
   if (CONFIG.debugMode) updateDebugHud();

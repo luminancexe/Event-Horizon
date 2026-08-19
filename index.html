@@ -53,6 +53,7 @@
       <div class="debug-row"><span>ASTEROIDS</span><b id="dbg-asteroids">-</b></div>
       <div class="debug-row"><span>FRAGMENTS</span><b id="dbg-fragments">-</b></div>
       <div class="debug-row"><span>GRAVITY CALCS/F</span><b id="dbg-gravcalcs">-</b></div>
+      <div class="debug-row"><span>ACTIVE LENSES</span><b id="dbg-lenses">0</b></div>
       <div class="debug-row"><span>SIM SPEED</span><b id="dbg-speed">-</b></div>
       <div class="debug-row"><span>SUB-STEPS</span><b id="dbg-substeps">-</b></div>
       <div class="debug-row divider"><span>SELECTED OBJECT</span></div>
@@ -128,10 +129,11 @@
         <span>DISK BRIGHTNESS</span><span class="val" id="val-disk">1.00</span>
         <input type="range" id="slider-disk" min="0.2" max="2.5" step="0.05" value="1">
       </label>
-      <label class="slider-row" title="How strongly the background starfield bends around a black hole on screen.">
+      <label class="slider-row" title="How strongly the background starfield bends around a black hole on screen. (Visualization control)">
         <span>LENSING STRENGTH</span><span class="val" id="val-lens">1.00</span>
         <input type="range" id="slider-lens" min="0" max="2" step="0.05" value="1">
       </label>
+      <button id="btn-lensing-toggle" class="wide-btn active-toggle" title="Toggle multi-singularity relativistic gravitational lensing post-processing distortion.">&#9679; GRAVITATIONAL LENSING: ON</button>
       <button id="btn-trails-toggle" class="wide-btn active-toggle" title="Show or hide every object's motion trail (independent of the Debug HUD's own path overlay).">&#9679; TRAILS: ON</button>
       <label class="slider-row" title="How many points of history each trail keeps. Longer trails cost a little more to update.">
         <span>TRAIL LENGTH</span><span class="val" id="val-traillen">140</span>

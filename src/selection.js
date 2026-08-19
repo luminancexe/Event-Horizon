@@ -338,6 +338,11 @@ export function updateInfoPanel() {
         ? 'SCHWARZSCHILD (a = 0.00)'
         : `KERR (a = ${spinVal >= 0 ? '+' : ''}${spinVal.toFixed(2)} ${spinVal >= 0 ? 'PROGRADE' : 'RETROGRADE'})`;
 
+    const camDist = Math.max(bh.mesh.position.distanceTo(camera.position), 0.5);
+    const rs = bh.schwarzschildRadius || (2 * CONFIG.G * bh.mass) / (C_SIM * C_SIM);
+    const thetaE = Math.sqrt((2 * rs) / camDist);
+    const thetaDeg = (thetaE * 180) / Math.PI;
+
     $('info-name').textContent = bh.name;
     $('info-type').textContent = classLabel;
     $('info-parent').textContent = bh.spinDirection
@@ -353,12 +358,13 @@ export function updateInfoPanel() {
     $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU`;
     $('info-tidal').textContent = 'EXTREME';
     $('info-influence').textContent = bh.angularMomentumSim !== undefined
-      ? `J: ${Math.abs(bh.angularMomentumSim).toExponential(2)}`
-      : bh.bhClass === 'supermassive' ? 'GALACTIC CORE' : 'LOCAL SYSTEM';
+      ? `J: ${Math.abs(bh.angularMomentumSim).toExponential(2)} | \u03b8_E: ${thetaDeg.toFixed(2)}\u00b0`
+      : `\u03b8_E: ${thetaDeg.toFixed(2)}\u00b0`;
+    const lensLabel = CONFIG.lensingEnabled ? `LENS: ACTIVE (${CONFIG.lensStrength.toFixed(1)}\u00d7)` : 'LENS: OFF';
     $('info-status').textContent =
       bh.rotationModel === 'kerr'
-        ? (CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE | HORIZON: 0.000×' : 'FRAME DRAG: PAUSED | HORIZON: 0.000×')
-        : 'STATIC | HORIZON: 0.000×';
+        ? `${CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED'} | ${lensLabel}`
+        : `STATIC | ${lensLabel}`;
     positionSelectionVisuals(bh.mesh.position, bh.velocity, bh.visualRadius * 2.6, null);
     return;
   }
