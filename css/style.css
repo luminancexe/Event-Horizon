@@ -940,20 +940,24 @@ button:focus-visible, input:focus-visible, .ghost-btn:focus-visible {
 
 #notify-banner {
   position: fixed;
-  top: 64px;
+  top: 84px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 30;
-  background: rgba(8, 10, 16, 0.85);
+  background: rgba(8, 10, 16, 0.90);
   border: 1px solid var(--red);
   color: var(--red);
-  padding: 9px 22px;
-  font-size: 11px;
-  letter-spacing: 2px;
+  padding: 6px 16px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
   font-family: var(--display);
   font-weight: 600;
-  box-shadow: 0 0 20px rgba(255, 93, 93, 0.35);
+  box-shadow: 0 0 16px rgba(255, 93, 93, 0.35);
   white-space: nowrap;
+  pointer-events: none;
+  border-radius: 2px;
+  backdrop-filter: blur(6px);
+  transition: opacity 0.2s ease;
 }
 
 /* ==========================================================================
