@@ -190,11 +190,20 @@ function animate() {
       }
     }
 
-    // Accretion disk shader time advancement and flare dissipation
+    // Accretion disk shader time advancement, flare dissipation, and relativistic Doppler parameters
     for (const bh of blackHoles()) {
-      bh.diskMat.uniforms.uTime.value += dt;
-      bh._burst = Math.max(0, (bh._burst || 0) - dt * 0.7);
-      bh.diskMat.uniforms.uBrightness.value = CONFIG.diskBrightness + bh._burst;
+      if (bh.diskMat) {
+        bh.diskMat.uniforms.uTime.value += dt;
+        bh._burst = Math.max(0, (bh._burst || 0) - dt * 0.7);
+        bh.diskMat.uniforms.uBrightness.value = CONFIG.diskBrightness + bh._burst;
+        bh.diskMat.uniforms.uCameraPos.value.copy(camera.position);
+        bh.diskMat.uniforms.uBHPos.value.copy(bh.mesh.position);
+        bh.diskMat.uniforms.uSpinAxis.value.copy(bh.spinDirection);
+        bh.diskMat.uniforms.uSpin.value = bh.spin;
+        bh.diskMat.uniforms.uMass.value = bh.mass;
+        bh.diskMat.uniforms.uDopplerEnabled.value = CONFIG.dopplerBeamingEnabled;
+        bh.diskMat.uniforms.uG.value = CONFIG.G;
+      }
     }
     diskLight.intensity =
       5 + Math.sin(state.simTime * 0.6) * 1.2 + (dominantBlackHole()?._burst || 0) * 4;

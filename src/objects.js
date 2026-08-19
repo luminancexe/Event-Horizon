@@ -518,6 +518,38 @@ export function inferBHClass(mass) {
 }
 
 /**
+ * Computes the physical Kerr Innermost Stable Circular Orbit (ISCO) radius in simulation distance units:
+ *   Z1 = 1 + (1 - a^2)^(1/3) * ((1 + a)^(1/3) + (1 - a)^(1/3))
+ *   Z2 = sqrt(3*a^2 + Z1^2)
+ *   r_ISCO/M = 3 + Z2 - sign(a) * sqrt((3 - Z1) * (3 + Z1 + 2*Z2))
+ *   r_ISCO = (r_ISCO/M) * (r_s / 2)
+ *
+ * @param {number} spin - Dimensionless Kerr spin parameter a in [-1, 1].
+ * @param {number} mass - Black hole mass in solar masses (M☉).
+ * @returns {number} Physical ISCO radius in simulation distance units.
+ */
+export function computeKerrISCO(spin, mass) {
+  const a = THREE.MathUtils.clamp(spin ?? 0, -1, 1);
+  const rs = (2 * CONFIG.G * mass) / (C_SIM * C_SIM);
+  const M = rs * 0.5;
+  const a2 = a * a;
+  const cbrt1PlusA = Math.cbrt(1 + a);
+  const cbrt1MinusA = Math.cbrt(Math.max(0, 1 - a));
+  const z1 = 1 + Math.cbrt(Math.max(0, 1 - a2)) * (cbrt1PlusA + cbrt1MinusA);
+  const z2 = Math.sqrt(3 * a2 + z1 * z1);
+  const signA = a > 0.0001 ? 1 : a < -0.0001 ? -1 : 0;
+  const innerTerm = Math.max(0, (3 - z1) * (3 + z1 + 2 * z2));
+  const rISCO_M = 3 + z2 - signA * Math.sqrt(innerTerm);
+  return rISCO_M * M;
+}
+
+// Persistent module scratch objects for zero-allocation orientation updates
+const _scratchErgoQuat = new THREE.Quaternion();
+const _scratchDiskQuat = new THREE.Quaternion();
+const _scratchNormalY = new THREE.Vector3(0, 1, 0);
+const _scratchSpinDir = new THREE.Vector3();
+
+/**
  * Gravitational singularity with event horizon, photon ring, optional accretion disk,
  * and Kerr-inspired spin / ergosphere parameters.
  */
@@ -538,7 +570,8 @@ export class BlackHole extends CelestialBody {
       : new THREE.Vector3(0, 1, 0);
 
     this.visualRadius = opts.visualRadius;
-    this.diskMat = opts.diskMat;
+    this.diskMesh = opts.diskMesh || null;
+    this.diskMat = opts.diskMat || null;
     this.photonSprite = opts.photonSprite;
     this.ergosphereMesh = opts.ergosphereMesh || null;
     this.primordialGlow = opts.primordialGlow || null;
@@ -569,6 +602,14 @@ export class BlackHole extends CelestialBody {
   get kerrHorizonRadius() {
     const a = this.spin;
     return (this.schwarzschildRadius / 2) * (1 + Math.sqrt(Math.max(0, 1 - a * a)));
+  }
+
+  /**
+   * Physical Kerr ISCO radius in simulation distance units:
+   * @returns {number}
+   */
+  get iscoRadius() {
+    return computeKerrISCO(this.spin, this.mass);
   }
 
   /**
@@ -624,11 +665,20 @@ export class BlackHole extends CelestialBody {
       this.visualRadius
     );
 
-    const q = new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 1, 0),
-      this.spinDirection.clone().normalize()
-    );
-    this.ergosphereMesh.quaternion.copy(q);
+    _scratchSpinDir.copy(this.spinDirection).normalize();
+    _scratchErgoQuat.setFromUnitVectors(_scratchNormalY, _scratchSpinDir);
+    this.ergosphereMesh.quaternion.copy(_scratchErgoQuat);
+  }
+
+  /**
+   * Updates accretion disk spatial orientation based on current spinDirection.
+   * Aligns the disk normal with spinDirection using persistent zero-allocation scratch objects.
+   */
+  updateDiskOrientation() {
+    if (!this.diskMesh) return;
+    _scratchSpinDir.copy(this.spinDirection).normalize();
+    _scratchDiskQuat.setFromUnitVectors(_scratchNormalY, _scratchSpinDir);
+    this.diskMesh.quaternion.copy(_scratchDiskQuat);
   }
 }
 
@@ -705,15 +755,25 @@ export function createBlackHole(opts = {}) {
     group.add(primordialGlow);
   }
 
-  // Planar turbulent accretion disk (scaled by classification)
+  // Planar turbulent accretion disk (scaled by classification and Kerr ISCO)
   let diskMat = null;
   let diskMesh = null;
   if (classConfig.hasDisk && opts.hasDisk !== false) {
     const diskScale = opts.diskScale ?? classConfig.diskScale;
-    diskMat = createDiskMaterial(CONFIG.diskBrightness);
-    const diskGeo = new THREE.RingGeometry(visualRadius * 1.2, visualRadius * diskScale, 256, 16);
+    const rs = (2 * CONFIG.G * mass) / (C_SIM * C_SIM);
+    const rISCO = computeKerrISCO(spin, mass);
+    const iscoNorm = rs > 0 ? rISCO / (3 * rs) : 1.0;
+    const innerRadius = visualRadius * (1.0 + 0.20 * iscoNorm);
+    const outerRadius = visualRadius * diskScale;
+
+    diskMat = createDiskMaterial(CONFIG.diskBrightness, {
+      spin,
+      mass,
+      innerRadius,
+    });
+    const diskGeo = new THREE.RingGeometry(innerRadius, outerRadius, 256, 16);
+    diskGeo.rotateX(-Math.PI / 2); // Base normal aligned with +Y
     diskMesh = new THREE.Mesh(diskGeo, diskMat);
-    diskMesh.rotation.x = -Math.PI / 2;
     group.add(diskMesh);
   }
 
@@ -737,6 +797,7 @@ export function createBlackHole(opts = {}) {
     name: opts.name || randomName('blackhole') + '-PRIME',
     mesh: group,
     core: horizonMesh,
+    diskMesh,
     diskMat,
     photonSprite,
     ergosphereMesh,
@@ -752,6 +813,7 @@ export function createBlackHole(opts = {}) {
   });
 
   obj.updateErgosphere();
+  obj.updateDiskOrientation();
 
   state.bodies.push(obj);
   registerSelectable(horizonMesh, obj);

@@ -61,6 +61,7 @@
       <div class="debug-row"><span>ACCELERATION</span><b id="dbg-sel-acc">-</b></div>
       <div class="debug-row"><span>FRAME DRAG ACC</span><b id="dbg-sel-framedrag">-</b></div>
       <div class="debug-row"><span>TIME DILATION</span><b id="dbg-sel-dilation">-</b></div>
+      <div class="debug-row"><span>DOPPLER BEAM</span><b id="dbg-sel-doppler">-</b></div>
       <div class="debug-row"><span>KINETIC ENERGY</span><b id="dbg-sel-ke">-</b></div>
       <div class="debug-row"><span>POTENTIAL ENERGY</span><b id="dbg-sel-pe">-</b></div>
       <div class="debug-row divider"><span>VISUAL OVERLAYS</span></div>
@@ -134,6 +135,7 @@
         <input type="range" id="slider-lens" min="0" max="2" step="0.05" value="1">
       </label>
       <button id="btn-lensing-toggle" class="wide-btn active-toggle" title="Toggle multi-singularity relativistic gravitational lensing post-processing distortion.">&#9679; GRAVITATIONAL LENSING: ON</button>
+      <button id="btn-doppler-toggle" class="wide-btn active-toggle" title="Toggle Kerr relativistic accretion disk Doppler boosting and gravitational redshift.">&#9679; DOPPLER BEAMING: ON</button>
       <button id="btn-trails-toggle" class="wide-btn active-toggle" title="Show or hide every object's motion trail (independent of the Debug HUD's own path overlay).">&#9679; TRAILS: ON</button>
       <label class="slider-row" title="How many points of history each trail keeps. Longer trails cost a little more to update.">
         <span>TRAIL LENGTH</span><span class="val" id="val-traillen">140</span>

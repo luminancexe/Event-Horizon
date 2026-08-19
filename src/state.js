@@ -19,6 +19,7 @@ export const CONFIG = {
   diskBrightness: 1.0,       // Accretion disk shader intensity multiplier
   lensStrength: 1.0,         // Gravitational lensing post-processing distortion strength
   lensingEnabled: true,      // Master gravitational lensing post-processing switch
+  dopplerBeamingEnabled: true,// Relativistic accretion disk Doppler beaming & gravitational redshift switch
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch

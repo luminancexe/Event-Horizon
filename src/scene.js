@@ -14,7 +14,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { makeGlowTexture, starGlowTex } from './textures.js';
-import { MAX_LENSES } from './state.js';
+import { CONFIG, C_SIM, MAX_LENSES } from './state.js';
 
 /* ============================================================================
    RENDERER, SCENE, CAMERA, CONTROLS, AND LIGHTS
@@ -165,12 +165,14 @@ buildNebulae();
 /**
  * Creates an instance of the relativistic accretion disk shader material.
  * Implements procedural multi-octave Fractal Brownian Motion (fBm) turbulence,
- * differential Keplerian orbital shear (omega ~ r^-1.5), and radial blackbody temperature gradients.
+ * differential Keplerian orbital shear (omega ~ r^-1.5), Kerr-inspired relativistic
+ * Doppler boosting/dimming (delta^3), gravitational redshift, and spectral color shifting.
  *
  * @param {number} brightness - Base brightness uniform multiplier.
+ * @param {object} [opts={}] - Initial black hole parameter overrides.
  * @returns {THREE.ShaderMaterial}
  */
-export function createDiskMaterial(brightness) {
+export function createDiskMaterial(brightness, opts = {}) {
   return new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -179,18 +181,41 @@ export function createDiskMaterial(brightness) {
     uniforms: {
       uTime: { value: Math.random() * 100 },
       uBrightness: { value: brightness },
+      uCameraPos: { value: new THREE.Vector3(0, 160, 300) },
+      uBHPos: { value: new THREE.Vector3(0, 0, 0) },
+      uSpinAxis: { value: new THREE.Vector3(0, 1, 0) },
+      uSpin: { value: opts.spin ?? 0.85 },
+      uMass: { value: opts.mass ?? 5000 },
+      uInnerRadius: { value: opts.innerRadius ?? 10.8 },
+      uDopplerEnabled: { value: CONFIG.dopplerBeamingEnabled ?? true },
+      uG: { value: CONFIG.G },
+      uCSim: { value: C_SIM },
     },
     vertexShader: `
       varying vec2 vUv;
+      varying vec3 vWorldPosition;
       void main() {
         vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPos.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
       }
     `,
     fragmentShader: `
       varying vec2 vUv;
+      varying vec3 vWorldPosition;
+
       uniform float uTime;
       uniform float uBrightness;
+      uniform vec3 uCameraPos;
+      uniform vec3 uBHPos;
+      uniform vec3 uSpinAxis;
+      uniform float uSpin;
+      uniform float uMass;
+      uniform float uInnerRadius;
+      uniform bool uDopplerEnabled;
+      uniform float uG;
+      uniform float uCSim;
 
       // 2D pseudo-random hash generator
       float hash(vec2 p) {
@@ -225,12 +250,15 @@ export function createDiskMaterial(brightness) {
         float radialFrac = clamp(vUv.y, 0.0, 1.0);
         float angle = vUv.x * 6.28318530718;
 
-        // Differential Keplerian rotation: inner disk orbits faster than outer disk
-        float angVel = 5.2 / (radialFrac * 2.2 + 0.35);
-        float rotAngle = angle + uTime * angVel * 0.12;
+        // Differential Keplerian rotation modulated by spin sign and magnitude
+        float spinSign = uSpin > 0.001 ? 1.0 : (uSpin < -0.001 ? -1.0 : 0.0);
+        float spinMag = abs(uSpin);
+        float rotDirection = spinSign != 0.0 ? spinSign : 1.0;
+        float angVel = (5.2 / (radialFrac * 2.2 + 0.35)) * (1.0 + spinMag * 0.25);
+        float rotAngle = angle + uTime * angVel * 0.12 * rotDirection;
 
-        float turb = fbm(vec2(rotAngle * 2.4, radialFrac * 5.0 - uTime * 0.08));
-        float turb2 = fbm(vec2(rotAngle * 5.5 + 4.0, radialFrac * 9.0 + uTime * 0.05));
+        float turb = fbm(vec2(rotAngle * 2.4, radialFrac * 5.0 - uTime * 0.08 * rotDirection));
+        float turb2 = fbm(vec2(rotAngle * 5.5 + 4.0, radialFrac * 9.0 + uTime * 0.05 * rotDirection));
         float brightness = turb * 0.65 + turb2 * 0.45;
 
         // Thermal blackbody color ramp: white-hot inner edge to deep red outer rim
@@ -245,11 +273,64 @@ export function createDiskMaterial(brightness) {
         float flare = pow(max(turb2, 0.0), 4.0) * 1.8;
         col += vec3(0.7, 0.85, 1.0) * flare * (1.0 - radialFrac);
 
+        // Relativistic Doppler Beaming & Gravitational Redshift Calculation
+        float dopplerFactor = 1.0;
+        float gravRedshift = 1.0;
+
+        if (uDopplerEnabled) {
+          vec3 rVec = vWorldPosition - uBHPos;
+          float worldR = max(length(rVec), 0.1);
+          vec3 uR = rVec / worldR;
+
+          vec3 spinAxisNorm = length(uSpinAxis) > 0.001 ? normalize(uSpinAxis) : vec3(0.0, 1.0, 0.0);
+          vec3 uPhi = cross(spinAxisNorm, uR);
+          float uPhiLen = length(uPhi);
+          if (uPhiLen > 0.0001) {
+            uPhi = (uPhi / uPhiLen) * rotDirection;
+          } else {
+            uPhi = vec3(0.0);
+          }
+
+          vec3 camDir = uCameraPos - vWorldPosition;
+          float camDist = max(length(camDir), 0.1);
+          vec3 nObs = camDir / camDist;
+
+          // Line-of-sight velocity alignment cosine
+          float cosTheta = dot(uPhi, nObs);
+
+          // Orbital velocity v ~ sqrt(GM/r) with Kerr ISCO relativistic inner enhancement
+          float vOrbit = sqrt(max((uG * uMass) / worldR, 0.0)) * (1.0 + 0.15 * spinMag * (uInnerRadius / worldR));
+          float beta = clamp(vOrbit / max(uCSim, 1.0), 0.0, 0.75);
+          float gamma = 1.0 / sqrt(max(1.0 - beta * beta, 0.01));
+
+          // Relativistic Doppler factor delta = 1 / (gamma * (1 - beta * cosTheta))
+          float delta = 1.0 / max(gamma * (1.0 - beta * cosTheta), 0.05);
+
+          // Intensity scaling I_obs = I_emit * delta^3 (clamped for visual dynamic range)
+          dopplerFactor = spinSign != 0.0 ? clamp(pow(delta, 3.0), 0.12, 4.50) : 1.0;
+
+          // Kerr-inspired gravitational redshift approximation g_grav = sqrt(1 - r_H / r)
+          float rs = (2.0 * uG * uMass) / (uCSim * uCSim);
+          float rH = (rs * 0.5) * (1.0 + sqrt(max(0.0, 1.0 - spinMag * spinMag)));
+          gravRedshift = sqrt(max(1.0 - (rH * 0.9) / max(worldR, rH * 0.95), 0.001));
+
+          // Frequency shift spectral modulation (blue-shifting approaching side, red-shifting receding side)
+          float gNet = delta * gravRedshift;
+          vec3 blueTint = vec3(0.65, 0.85, 1.15);
+          vec3 redTint = vec3(1.15, 0.40, 0.15);
+          if (gNet > 1.0) {
+            col = mix(col, col * blueTint, smoothstep(1.0, 1.6, gNet));
+          } else {
+            col = mix(col, col * redTint, smoothstep(1.0, 0.5, gNet));
+          }
+        }
+
         // Smooth inner event horizon and outer edge alpha falloff
         float edgeFade = smoothstep(0.0, 0.08, radialFrac) * (1.0 - smoothstep(0.82, 1.0, radialFrac));
-        float alpha = edgeFade * (0.35 + brightness * 0.9) * uBrightness;
+        float alpha = edgeFade * (0.35 + brightness * 0.9) * uBrightness * min(dopplerFactor, 2.0);
 
-        gl_FragColor = vec4(col * (0.6 + brightness * 0.9) * uBrightness, alpha);
+        vec3 finalColor = col * (0.6 + brightness * 0.9) * uBrightness * dopplerFactor * gravRedshift;
+        gl_FragColor = vec4(finalColor, alpha);
       }
     `,
   });

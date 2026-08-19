@@ -105,6 +105,24 @@ export function updateDebugHud() {
     }
   }
 
+  const elDbgDoppler = $('dbg-sel-doppler');
+  if (elDbgDoppler) {
+    if (selected && selected.type === 'blackhole') {
+      if (selected.diskMat && CONFIG.dopplerBeamingEnabled) {
+        const spinVal = selected.spin ?? 0;
+        elDbgDoppler.textContent = Math.abs(spinVal) > 0.001
+          ? `ACTIVE (a=${spinVal >= 0 ? '+' : ''}${spinVal.toFixed(2)})`
+          : 'STATIC (a=0.00)';
+      } else if (selected.diskMat) {
+        elDbgDoppler.textContent = 'PAUSED (DISABLED)';
+      } else {
+        elDbgDoppler.textContent = 'NO ACCRETION DISK';
+      }
+    } else {
+      elDbgDoppler.textContent = '\u2014';
+    }
+  }
+
   if (vel && pos) {
     $('dbg-sel-vel').textContent = `${vel.length().toFixed(3)} u/s`;
     $('dbg-sel-acc').textContent = acc ? `${acc.length().toFixed(4)} u/s\u00b2` : '\u2014';
@@ -529,6 +547,14 @@ document.getElementById('btn-lensing-toggle').addEventListener('click', () => {
   logEvent(`Gravitational lensing ${CONFIG.lensingEnabled ? 'enabled' : 'disabled'}.`, 'info');
 });
 
+document.getElementById('btn-doppler-toggle').addEventListener('click', () => {
+  CONFIG.dopplerBeamingEnabled = !CONFIG.dopplerBeamingEnabled;
+  const btn = document.getElementById('btn-doppler-toggle');
+  btn.textContent = CONFIG.dopplerBeamingEnabled ? '\u25cf DOPPLER BEAMING: ON' : '\u25cb DOPPLER BEAMING: OFF';
+  btn.classList.toggle('off', !CONFIG.dopplerBeamingEnabled);
+  logEvent(`Relativistic Doppler beaming ${CONFIG.dopplerBeamingEnabled ? 'enabled' : 'disabled'}.`, 'info');
+});
+
 document.getElementById('btn-debug').addEventListener('click', () => {
   CONFIG.debugMode = !CONFIG.debugMode;
   document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
@@ -599,6 +625,12 @@ export function syncUIFromConfig() {
   if (lensBtn) {
     lensBtn.textContent = CONFIG.lensingEnabled ? '\u25cf GRAVITATIONAL LENSING: ON' : '\u25cb GRAVITATIONAL LENSING: OFF';
     lensBtn.classList.toggle('off', !CONFIG.lensingEnabled);
+  }
+
+  const dopplerBtn = document.getElementById('btn-doppler-toggle');
+  if (dopplerBtn) {
+    dopplerBtn.textContent = CONFIG.dopplerBeamingEnabled ? '\u25cf DOPPLER BEAMING: ON' : '\u25cb DOPPLER BEAMING: OFF';
+    dopplerBtn.classList.toggle('off', !CONFIG.dopplerBeamingEnabled);
   }
 
   const trailBtn = document.getElementById('btn-trails-toggle');

@@ -59,6 +59,9 @@ export const influenceSphere = new THREE.Mesh(
 influenceSphere.visible = false;
 scene.add(influenceSphere);
 
+// Module-level persistent scratch vectors for zero-allocation telemetry calculations
+const _scratchSelCamDir = new THREE.Vector3();
+
 const predictGeo = new THREE.BufferGeometry();
 const predictPositions = new Float32Array(80 * 3);
 predictGeo.setAttribute('position', new THREE.BufferAttribute(predictPositions, 3));
@@ -343,6 +346,13 @@ export function updateInfoPanel() {
     const thetaE = Math.sqrt((2 * rs) / camDist);
     const thetaDeg = (thetaE * 180) / Math.PI;
 
+    let inclinationDeg = 0;
+    if (bh.spinDirection) {
+      _scratchSelCamDir.subVectors(camera.position, bh.mesh.position).normalize();
+      const dotS = Math.abs(bh.spinDirection.dot(_scratchSelCamDir));
+      inclinationDeg = (Math.acos(Math.min(1.0, dotS)) * 180) / Math.PI;
+    }
+
     $('info-name').textContent = bh.name;
     $('info-type').textContent = classLabel;
     $('info-parent').textContent = bh.spinDirection
@@ -351,20 +361,26 @@ export function updateInfoPanel() {
     $('info-mass').textContent = bh.mass.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' M☉';
     $('info-distance').textContent = (bh.mesh.position.length() / 10).toFixed(2) + ' AU';
     $('info-velocity').textContent = (bh.velocity.length() / C_SIM).toFixed(2) + 'c';
-    $('info-orbit').textContent = spinStr;
+    $('info-orbit').textContent = `${spinStr} | i: ${inclinationDeg.toFixed(0)}\u00b0`;
     $('info-temp').textContent =
-      bh.bhClass === 'primordial' ? 'HAWKING EMISSION' : bh.diskMat ? 'ACCRETION HEATED' : 'INACTIVE';
+      bh.bhClass === 'primordial'
+        ? 'HAWKING EMISSION'
+        : bh.diskMat
+        ? (CONFIG.dopplerBeamingEnabled ? `ACCRETION | DOPPLER i=${inclinationDeg.toFixed(0)}\u00b0` : 'ACCRETION (DOPPLER OFF)')
+        : 'INACTIVE';
     $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';
-    $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU`;
+    const iscoAu = (bh.iscoRadius / 10).toFixed(2);
+    $('info-lifecycle').textContent = `r_s: ${(bh.schwarzschildRadius / 10).toFixed(2)} AU | r_H: ${(bh.kerrHorizonRadius / 10).toFixed(2)} AU | ISCO: ${iscoAu} AU`;
     $('info-tidal').textContent = 'EXTREME';
     $('info-influence').textContent = bh.angularMomentumSim !== undefined
       ? `J: ${Math.abs(bh.angularMomentumSim).toExponential(2)} | \u03b8_E: ${thetaDeg.toFixed(2)}\u00b0`
       : `\u03b8_E: ${thetaDeg.toFixed(2)}\u00b0`;
     const lensLabel = CONFIG.lensingEnabled ? `LENS: ACTIVE (${CONFIG.lensStrength.toFixed(1)}\u00d7)` : 'LENS: OFF';
+    const dopplerLabel = CONFIG.dopplerBeamingEnabled ? 'DOPPLER: ON' : 'DOPPLER: OFF';
     $('info-status').textContent =
       bh.rotationModel === 'kerr'
-        ? `${CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED'} | ${lensLabel}`
-        : `STATIC | ${lensLabel}`;
+        ? `${CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED'} | ${lensLabel} | ${dopplerLabel}`
+        : `STATIC | ${lensLabel} | ${dopplerLabel}`;
     positionSelectionVisuals(bh.mesh.position, bh.velocity, bh.visualRadius * 2.6, null);
     return;
   }
