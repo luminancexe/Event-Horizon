@@ -292,6 +292,7 @@ const CONFIG_BOUNDS = {
   tdeCircVelocityThreshold: [0.01, 0.5],
   tdeMaxCircularizationTime: [0.5, 20.0],
   tdeEddingtonFeedbackStrength: [0.0, 2.0],
+  diskRelativisticBoost: [0.0, 2.0],
 };
 
 /**

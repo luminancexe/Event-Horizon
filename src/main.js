@@ -207,12 +207,18 @@ function animate() {
         bh._burst = Math.max(0, (bh._burst || 0) - dt * 0.7);
         bh.diskMat.uniforms.uBrightness.value = CONFIG.diskBrightness + bh._burst;
         bh.diskMat.uniforms.uAccretionRate.value = CONFIG.tdeEddingtonLimitEnabled ? bh.effectiveAccretionRate : bh.accretionRate;
+        bh.diskMat.uniforms.uEmergentLuminosity.value = bh.emergentLuminosity;
+        bh.diskMat.uniforms.uDiskTemperature.value = bh.diskTemperature;
+        bh.diskMat.uniforms.uInnerRadius.value = bh.iscoRadius;
+        bh.diskMat.uniforms.uOuterRadius.value = bh.visualRadius * (bh.diskScale || 6.5);
         bh.diskMat.uniforms.uCameraPos.value.copy(camera.position);
         bh.diskMat.uniforms.uBHPos.value.copy(bh.mesh.position);
         bh.diskMat.uniforms.uSpinAxis.value.copy(bh.spinDirection);
         bh.diskMat.uniforms.uSpin.value = bh.spin;
         bh.diskMat.uniforms.uMass.value = bh.mass;
         bh.diskMat.uniforms.uDopplerEnabled.value = CONFIG.dopplerBeamingEnabled;
+        bh.diskMat.uniforms.uSpectralMappingEnabled.value = CONFIG.diskSpectralMappingEnabled;
+        bh.diskMat.uniforms.uRelativisticBoost.value = CONFIG.diskRelativisticBoost;
         bh.diskMat.uniforms.uG.value = CONFIG.G;
       }
     }

@@ -627,6 +627,69 @@ export function computeKerrISCO(spin, mass) {
   return rISCO_M * M;
 }
 
+/**
+ * Computes Novikov-Thorne relativistic thin-disk spectral & emission properties at radius r:
+ *   F(r) = (3 * G * M * M_dot) / (8 * pi * r^3) * max(0, 1 - sqrt(r_ISCO / r))
+ *   r_peak = (49 / 36) * r_ISCO
+ *   T_emit(r) = T_peak * (r_peak / r)^(3/4) * [(1 - sqrt(r_ISCO / r)) / (1 - sqrt(r_ISCO / r_peak))]^(1/4)
+ *   beta = clamp((sqrt(GM/r) / c) / (1 + a*(r_s/2r)^1.5), 0, 0.82)
+ *   g_grav = sqrt(max(1 - r_H/r, 0.02))
+ *
+ * @param {number} r - Distance from singularity in simulation units.
+ * @param {number} rISCO - Physical ISCO radius in simulation units.
+ * @param {number} mDot - Effective accretion rate (M☉/s).
+ * @param {number} mass - Black hole mass (M☉).
+ * @param {number} spin - Dimensionless Kerr spin a in [-0.998, 0.998].
+ * @returns {{ rPeak: number, qFactor: number, flux: number, tEmit: number, tPeak: number, beta: number, gamma: number, gGrav: number }}
+ */
+export function computeDiskSpectralProperties(r, rISCO, mDot, mass, spin) {
+  const rSafe = Math.max(r || 0, 0.001);
+  const rIscoSafe = Math.max(rISCO || 0, 0.001);
+  const mDotSafe = Math.max(mDot || 0, 0.0);
+  const massSafe = Math.max(mass || 0, 0.001);
+  const a = THREE.MathUtils.clamp(spin ?? 0, -0.998, 0.998);
+
+  const rPeak = (49.0 / 36.0) * rIscoSafe;
+  const qFactor = rSafe > rIscoSafe ? Math.max(0.0, 1.0 - Math.sqrt(rIscoSafe / rSafe)) : 0.0;
+  const qPeak = Math.max(0.0, 1.0 - Math.sqrt(rIscoSafe / rPeak));
+
+  let flux = 0.0;
+  let tEmit = 0.0;
+  let tPeak = 0.0;
+
+  if (mDotSafe > 0 && massSafe > 0) {
+    const fluxFactor = (massSafe * mDotSafe) / (rIscoSafe * rIscoSafe * rIscoSafe);
+    tPeak = Math.min(Math.max(2.5e6 * Math.pow(Math.max(fluxFactor, 0), 0.25), 1e4), 5e7);
+    if (rSafe > rIscoSafe && qPeak > 0) {
+      flux = ((3.0 * CONFIG.G * massSafe * mDotSafe) / (8.0 * Math.PI * rSafe * rSafe * rSafe)) * qFactor;
+      const normProfile = Math.pow(rPeak / rSafe, 3.0) * (qFactor / qPeak);
+      tEmit = tPeak * Math.pow(Math.max(normProfile, 0.0), 0.25);
+    }
+  }
+
+  const rs = (2.0 * CONFIG.G * massSafe) / (C_SIM * C_SIM);
+  const rH = (rs * 0.5) * (1.0 + Math.sqrt(Math.max(0.0, 1.0 - a * a)));
+  const beta = THREE.MathUtils.clamp(
+    (Math.sqrt(Math.max((CONFIG.G * massSafe) / rSafe, 0.0)) / Math.max(C_SIM, 1.0)) /
+      (1.0 + a * Math.pow(rs / (2.0 * rSafe), 1.5)),
+    0.0,
+    0.82
+  );
+  const gamma = 1.0 / Math.sqrt(Math.max(1.0 - beta * beta, 0.01));
+  const gGrav = Math.sqrt(Math.max(1.0 - (rH * 0.95) / Math.max(rSafe, rH), 0.02));
+
+  return {
+    rPeak,
+    qFactor,
+    flux,
+    tEmit,
+    tPeak,
+    beta,
+    gamma,
+    gGrav,
+  };
+}
+
 // Persistent module scratch objects for zero-allocation orientation updates
 const _scratchErgoQuat = new THREE.Quaternion();
 const _scratchDiskQuat = new THREE.Quaternion();

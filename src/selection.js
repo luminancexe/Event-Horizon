@@ -377,7 +377,7 @@ export function updateInfoPanel() {
     const eddStr = bh.diskMass > 0 && eddRatio > 0 ? ` | λ_Edd: ${eddRatio.toFixed(2)}${isRegulated ? ' [REGULATED]' : ''}` : '';
     const mDotVal = isRegulated ? bh.effectiveAccretionRate : bh.accretionRate;
     const mDotStr = isRegulated ? `Ṁ_eff: ${mDotVal.toFixed(2)} M☉/s` : `Ṁ: ${mDotVal.toFixed(2)} M☉/s`;
-    const tempStr = bh.diskTemperature > 0 ? ` | T: ${(bh.diskTemperature / 1e6).toFixed(2)} MK` : '';
+    const tempStr = bh.diskTemperature > 0 ? ` | T_peak: ${(bh.diskTemperature / 1e6).toFixed(2)} MK` : '';
     const circStr = circCount > 0 ? ` | CIRC: ${circCount} pkts` : '';
 
     $('info-temp').textContent =

@@ -187,8 +187,13 @@ export function createDiskMaterial(brightness, opts = {}) {
       uSpin: { value: opts.spin ?? 0.85 },
       uMass: { value: opts.mass ?? 5000 },
       uInnerRadius: { value: opts.innerRadius ?? 10.8 },
+      uOuterRadius: { value: opts.outerRadius ?? 60.0 },
       uDopplerEnabled: { value: CONFIG.dopplerBeamingEnabled ?? true },
       uAccretionRate: { value: opts.accretionRate ?? 0.0 },
+      uEmergentLuminosity: { value: opts.emergentLuminosity ?? 0.0 },
+      uDiskTemperature: { value: opts.diskTemperature ?? 2.5e6 },
+      uSpectralMappingEnabled: { value: CONFIG.diskSpectralMappingEnabled ?? true },
+      uRelativisticBoost: { value: CONFIG.diskRelativisticBoost ?? 1.0 },
       uG: { value: CONFIG.G },
       uCSim: { value: C_SIM },
     },
@@ -214,8 +219,13 @@ export function createDiskMaterial(brightness, opts = {}) {
       uniform float uSpin;
       uniform float uMass;
       uniform float uInnerRadius;
+      uniform float uOuterRadius;
       uniform bool uDopplerEnabled;
       uniform float uAccretionRate;
+      uniform float uEmergentLuminosity;
+      uniform float uDiskTemperature;
+      uniform bool uSpectralMappingEnabled;
+      uniform float uRelativisticBoost;
       uniform float uG;
       uniform float uCSim;
 
@@ -248,7 +258,25 @@ export function createDiskMaterial(brightness, opts = {}) {
         return v;
       }
 
+      // Analytical Planckian / Blackbody continuous spectral color mapping
+      vec3 blackbodyColor(float tempK) {
+        float t = clamp(tempK / 1000.0, 0.5, 45.0);
+        vec3 col;
+        if (t < 6.5) {
+          col.r = 1.0;
+          col.g = clamp(0.39 + 0.38 * log(max(t - 0.5, 0.01)), 0.0, 1.0);
+          col.b = clamp(0.10 + 0.55 * log(max(t - 1.8, 0.01)), 0.0, 1.0);
+        } else {
+          col.r = clamp(1.18 - 0.08 * (t - 6.5), 0.55, 1.0);
+          col.g = clamp(1.06 - 0.03 * (t - 6.5), 0.72, 1.0);
+          col.b = 1.0;
+        }
+        return col;
+      }
+
       void main() {
+        vec3 rVec = vWorldPosition - uBHPos;
+        float worldR = max(length(rVec), 0.1);
         float radialFrac = clamp(vUv.y, 0.0, 1.0);
         float angle = vUv.x * 6.28318530718;
 
@@ -259,80 +287,86 @@ export function createDiskMaterial(brightness, opts = {}) {
         float angVel = (5.2 / (radialFrac * 2.2 + 0.35)) * (1.0 + spinMag * 0.25);
         float rotAngle = angle + uTime * angVel * 0.12 * rotDirection;
 
+        // Turbulent plasma fluctuations
         float turb = fbm(vec2(rotAngle * 2.4, radialFrac * 5.0 - uTime * 0.08 * rotDirection));
         float turb2 = fbm(vec2(rotAngle * 5.5 + 4.0, radialFrac * 9.0 + uTime * 0.05 * rotDirection));
-        float accBoost = 1.0 + log(1.0 + max(uAccretionRate, 0.0) * 12.0) * 0.45;
-        float brightness = (turb * 0.65 + turb2 * 0.45) * accBoost;
 
-        // Thermal blackbody color ramp: white-hot inner edge to deep red outer rim
-        vec3 hot = vec3(1.0, 0.98, 0.92);
-        vec3 mid = vec3(1.0, 0.55, 0.15);
-        vec3 outer = vec3(0.75, 0.12, 0.05);
+        // Novikov-Thorne-inspired physical radial dissipation profile
+        float rISCO = max(uInnerRadius, 0.1);
+        float rPeak = (49.0 / 36.0) * rISCO;
+        float qFactor = (worldR > rISCO) ? max(0.0, 1.0 - sqrt(rISCO / worldR)) : 0.0;
+        float qPeak = max(0.0, 1.0 - sqrt(rISCO / rPeak));
+        float normProfile = (worldR > rISCO && qPeak > 0.0) ? pow(rPeak / worldR, 3.0) * (qFactor / qPeak) : 0.0;
 
-        vec3 col = mix(hot, mid, smoothstep(0.0, 0.45, radialFrac));
-        col = mix(col, outer, smoothstep(0.45, 1.0, radialFrac));
+        // Local emitted characteristic temperature
+        float baseTemp = max(uDiskTemperature, 1.0e4);
+        float tEmit = baseTemp * pow(max(normProfile, 0.0), 0.25);
 
-        // High-energy turbulent flare highlights
-        float flare = pow(max(turb2, 0.0), 4.0) * 1.8;
-        col += vec3(0.7, 0.85, 1.0) * flare * (1.0 - radialFrac);
-
-        // Relativistic Doppler Beaming & Gravitational Redshift Calculation
-        float dopplerFactor = 1.0;
-        float gravRedshift = 1.0;
-
-        if (uDopplerEnabled) {
-          vec3 rVec = vWorldPosition - uBHPos;
-          float worldR = max(length(rVec), 0.1);
-          vec3 uR = rVec / worldR;
-
-          vec3 spinAxisNorm = length(uSpinAxis) > 0.001 ? normalize(uSpinAxis) : vec3(0.0, 1.0, 0.0);
-          vec3 uPhi = cross(spinAxisNorm, uR);
-          float uPhiLen = length(uPhi);
-          if (uPhiLen > 0.0001) {
-            uPhi = (uPhi / uPhiLen) * rotDirection;
-          } else {
-            uPhi = vec3(0.0);
-          }
-
-          vec3 camDir = uCameraPos - vWorldPosition;
-          float camDist = max(length(camDir), 0.1);
-          vec3 nObs = camDir / camDist;
-
-          // Line-of-sight velocity alignment cosine
-          float cosTheta = dot(uPhi, nObs);
-
-          // Orbital velocity v ~ sqrt(GM/r) with Kerr ISCO relativistic inner enhancement
-          float vOrbit = sqrt(max((uG * uMass) / worldR, 0.0)) * (1.0 + 0.15 * spinMag * (uInnerRadius / worldR));
-          float beta = clamp(vOrbit / max(uCSim, 1.0), 0.0, 0.75);
-          float gamma = 1.0 / sqrt(max(1.0 - beta * beta, 0.01));
-
-          // Relativistic Doppler factor delta = 1 / (gamma * (1 - beta * cosTheta))
-          float delta = 1.0 / max(gamma * (1.0 - beta * cosTheta), 0.05);
-
-          // Intensity scaling I_obs = I_emit * delta^3 (clamped for visual dynamic range)
-          dopplerFactor = spinSign != 0.0 ? clamp(pow(delta, 3.0), 0.12, 4.50) : 1.0;
-
-          // Kerr-inspired gravitational redshift approximation g_grav = sqrt(1 - r_H / r)
-          float rs = (2.0 * uG * uMass) / (uCSim * uCSim);
-          float rH = (rs * 0.5) * (1.0 + sqrt(max(0.0, 1.0 - spinMag * spinMag)));
-          gravRedshift = sqrt(max(1.0 - (rH * 0.9) / max(worldR, rH * 0.95), 0.001));
-
-          // Frequency shift spectral modulation (blue-shifting approaching side, red-shifting receding side)
-          float gNet = delta * gravRedshift;
-          vec3 blueTint = vec3(0.65, 0.85, 1.15);
-          vec3 redTint = vec3(1.15, 0.40, 0.15);
-          if (gNet > 1.0) {
-            col = mix(col, col * blueTint, smoothstep(1.0, 1.6, gNet));
-          } else {
-            col = mix(col, col * redTint, smoothstep(1.0, 0.5, gNet));
-          }
+        // Relativistic kinematics & metric quantities
+        vec3 spinAxisNorm = length(uSpinAxis) > 0.001 ? normalize(uSpinAxis) : vec3(0.0, 1.0, 0.0);
+        vec3 uR = rVec / worldR;
+        vec3 uPhi = cross(spinAxisNorm, uR);
+        float uPhiLen = length(uPhi);
+        if (uPhiLen > 0.0001) {
+          uPhi = (uPhi / uPhiLen) * rotDirection;
+        } else {
+          uPhi = vec3(0.0);
         }
 
-        // Smooth inner event horizon and outer edge alpha falloff
-        float edgeFade = smoothstep(0.0, 0.08, radialFrac) * (1.0 - smoothstep(0.82, 1.0, radialFrac));
-        float alpha = edgeFade * (0.35 + brightness * 0.9) * uBrightness * min(dopplerFactor, 2.0);
+        vec3 camDir = uCameraPos - vWorldPosition;
+        float camDist = max(length(camDir), 0.1);
+        vec3 nObs = camDir / camDist;
+        float cosTheta = dot(uPhi, nObs);
 
-        vec3 finalColor = col * (0.6 + brightness * 0.9) * uBrightness * dopplerFactor * gravRedshift;
+        // Relativistic orbital velocity in Kerr spacetime
+        float rs = (2.0 * uG * uMass) / (uCSim * uCSim);
+        float rH = (rs * 0.5) * (1.0 + sqrt(max(0.0, 1.0 - spinMag * spinMag)));
+        float vOrbit = sqrt(max((uG * uMass) / worldR, 0.0)) / (1.0 + uSpin * pow(rs / (2.0 * worldR), 1.5));
+        float beta = clamp(vOrbit / max(uCSim, 1.0), 0.0, 0.82);
+        float gamma = 1.0 / sqrt(max(1.0 - beta * beta, 0.01));
+
+        // Relativistic Doppler factor delta = 1 / (gamma * (1 - beta * cosTheta))
+        float delta = 1.0 / max(gamma * (1.0 - beta * cosTheta), 0.05);
+        delta = clamp(delta, 0.08, 6.0);
+
+        // Kerr gravitational redshift g_grav = sqrt(1 - r_H / r)
+        float gravRedshift = sqrt(max(1.0 - (rH * 0.95) / max(worldR, rH * 0.98), 0.02));
+
+        // Unified relativistic g-factor: g = delta * g_grav
+        float gNet = uDopplerEnabled ? (delta * gravRedshift) : 1.0;
+        float gEff = mix(1.0, gNet, clamp(uRelativisticBoost, 0.0, 2.0));
+
+        // Relativistically shifted observed temperature: T_obs = g * T_emit
+        float tObs = max(tEmit * gEff, 500.0);
+
+        // Spectral Color Determination
+        vec3 col;
+        if (uSpectralMappingEnabled) {
+          col = blackbodyColor(tObs);
+        } else {
+          vec3 hot = vec3(1.0, 0.98, 0.92);
+          vec3 mid = vec3(1.0, 0.55, 0.15);
+          vec3 outer = vec3(0.75, 0.12, 0.05);
+          col = mix(hot, mid, smoothstep(0.0, 0.45, radialFrac));
+          col = mix(col, outer, smoothstep(0.45, 1.0, radialFrac));
+        }
+
+        // Relativistic Invariant Intensity Scaling: I_obs = g^4 * I_emit
+        float iRel = uDopplerEnabled ? clamp(pow(gEff, 4.0), 0.05, 8.0) : 1.0;
+
+        // Emergent luminosity & accretion rate scaling
+        float accBoost = 1.0 + log(1.0 + max(uAccretionRate, 0.0) * 8.0) * 0.35;
+        float flare = pow(max(turb2, 0.0), 4.0) * 1.5;
+        col += vec3(0.6, 0.8, 1.0) * flare * (1.0 - radialFrac);
+
+        float diskEmit = (0.55 + turb * 0.45 + turb2 * 0.25) * (0.6 + normProfile * 1.4);
+
+        // Inner ISCO cutoff and outer edge smooth alpha falloff
+        float rOuter = max(uOuterRadius, rISCO * 4.0);
+        float edgeFade = smoothstep(rISCO * 0.95, rISCO * 1.05, worldR) * (1.0 - smoothstep(rOuter * 0.85, rOuter, worldR));
+        float alpha = edgeFade * (0.30 + diskEmit * 0.70) * uBrightness * min(iRel, 2.5);
+
+        vec3 finalColor = col * diskEmit * uBrightness * accBoost * iRel;
         gl_FragColor = vec4(finalColor, alpha);
       }
     `,
