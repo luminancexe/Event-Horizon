@@ -178,18 +178,46 @@ export function randomName(type) {
 }
 
 /**
+ * Computes the physical Roche tidal disruption radius for a body in the gravitational field of a black hole:
+ *   r_t = R_body * ( M_BH / M_body )^(1/3)
+ *
+ * Evaluates strictly in simulation distance units with robust numerical guards.
+ *
+ * @param {BlackHole} bh - Attracting singularity.
+ * @param {CelestialBody} body - Approaching celestial body.
+ * @returns {number} Tidal disruption radius in simulation distance units.
+ */
+export function computeTidalRadius(bh, body) {
+  if (!bh || !body || body.mass <= 0 || body.radius <= 0) {
+    return 0;
+  }
+  const mRatio = bh.mass / Math.max(body.mass, 1e-6);
+  if (!Number.isFinite(mRatio) || mRatio <= 0) {
+    return 0;
+  }
+  return body.radius * Math.cbrt(mRatio);
+}
+
+/**
  * Computes the characteristic interaction radii for a black hole.
  * Scales with the cube root of mass relative to the base black hole mass.
  *
  * @param {BlackHole} bh - Target black hole.
- * @returns {{ capture: number, tidal: number, drag: number }} Radii in world units.
+ * @param {CelestialBody|null} [body=null] - Optional approaching body for body-specific Roche tidal radius.
+ * @returns {{ capture: number, tidal: number, drag: number, kerrHorizon: number, schwarzschild: number, visual: number }} Radii in simulation units.
  */
-export function bhRadii(bh) {
+export function bhRadii(bh, body = null) {
   const s = Math.max(Math.cbrt(bh.mass / BASE_BH_MASS), 0.3);
+  const capture = BASE_HORIZON * CAPTURE_MULT * s;
+  const tidal = body ? computeTidalRadius(bh, body) : BASE_HORIZON * TIDAL_MULT * s;
+  const drag = BASE_HORIZON * DRAG_MULT * s;
   return {
-    capture: BASE_HORIZON * CAPTURE_MULT * s,
-    tidal: BASE_HORIZON * TIDAL_MULT * s,
-    drag: BASE_HORIZON * DRAG_MULT * s,
+    capture,
+    tidal,
+    drag,
+    kerrHorizon: bh.kerrHorizonRadius,
+    schwarzschild: bh.schwarzschildRadius,
+    visual: bh.visualRadius,
   };
 }
 
@@ -426,6 +454,10 @@ export class CelestialBody {
     this.properTime = opts.properTime ?? (opts.age ? opts.age / AGE_YEARS_PER_SIMSECOND : 0);
     this.timeDilation = 1.0;
     this.lifecycleScale = 1;
+    this.tdePhase = opts.tdePhase ?? 0;
+    this.initialMass = opts.initialMass ?? this.mass;
+    this.disruptedMass = opts.disruptedMass ?? 0;
+    this._initialRadius = opts.size ?? opts.radius ?? this.radius;
     this.lastLog = {};
     this._destroyed = false;
     this._createdAt = performance.now();
@@ -569,12 +601,28 @@ export class BlackHole extends CelestialBody {
         ).normalize()
       : new THREE.Vector3(0, 1, 0);
 
-    this.visualRadius = opts.visualRadius;
+    this._visualRadius = opts.visualRadius;
     this.diskMesh = opts.diskMesh || null;
     this.diskMat = opts.diskMat || null;
     this.photonSprite = opts.photonSprite;
     this.ergosphereMesh = opts.ergosphereMesh || null;
     this.primordialGlow = opts.primordialGlow || null;
+  }
+
+  /**
+   * Dynamic visual horizon radius in simulation distance units, synchronized with mass growth.
+   * @returns {number}
+   */
+  get visualRadius() {
+    return Math.max(BASE_HORIZON * Math.cbrt(this.mass / BASE_BH_MASS), 1.6);
+  }
+
+  /**
+   * Alias for visualRadius.
+   * @returns {number}
+   */
+  get radius() {
+    return this.visualRadius;
   }
 
   /**

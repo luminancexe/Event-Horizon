@@ -20,6 +20,8 @@ export const CONFIG = {
   lensStrength: 1.0,         // Gravitational lensing post-processing distortion strength
   lensingEnabled: true,      // Master gravitational lensing post-processing switch
   dopplerBeamingEnabled: true,// Relativistic accretion disk Doppler beaming & gravitational redshift switch
+  tidalDisruptionEnabled: true,// Relativistic continuous tidal disruption & plasma streams switch
+  tdeStreamDensity: 1.0,     // Tidal disruption stream particle emission density multiplier (0.5x - 2.0x)
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch
@@ -174,8 +176,10 @@ export const state = {
   aRadius: [],
   aAlive: [],
 
-  // Tidal disruption debris fragments
+  // Tidal disruption debris fragments & continuous plasma streams
   fragments: [],
+  tdeManager: null,
+  activeTdeCount: 0,
 
   // Camera animation and kinematic state
   cameraMode: 'free',

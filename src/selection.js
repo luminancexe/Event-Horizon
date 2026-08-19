@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { CONFIG, state, C_SIM, BH_MASS_CLASSES } from './state.js';
 import { scene, camera } from './scene.js';
 import { selectionRingTex } from './textures.js';
-import { findDominantAttractor, nearestBlackHole, bhRadii, computeTimeDilation } from './objects.js';
+import { findDominantAttractor, nearestBlackHole, bhRadii, computeTimeDilation, computeTidalRadius } from './objects.js';
 import { flyCameraTo, setCameraMode } from './camera.js';
 import { logEvent, showBanner } from './events.js';
 import { destroyObject } from './effects.js';
@@ -425,8 +425,9 @@ export function updateInfoPanel() {
     ? `${ratePct}% (${dilation.toFixed(3)}×)`
     : '100.0% (1.000× NOMINAL)';
 
+  const isStripping = obj.tdePhase === 1;
   $('info-name').textContent = obj.name;
-  $('info-type').textContent = obj.type.toUpperCase();
+  $('info-type').textContent = isStripping ? `${obj.type.toUpperCase()} (TDE STRIPPING)` : obj.type.toUpperCase();
   $('info-parent').textContent = dom ? dom.name : '—';
   $('info-mass').textContent =
     obj.mass.toFixed(2) + (obj.type === 'star' || obj.type === 'neutron' ? ' M☉' : ' Mt');
@@ -442,7 +443,10 @@ export function updateInfoPanel() {
       : '—';
   $('info-age').textContent = `${Math.floor(obj.age).toLocaleString()} yrs | Rate: ${rateStr}`;
 
-  if (obj.type === 'star') {
+  if (isStripping && obj.initialMass && obj.initialMass > 0) {
+    const lossPct = Math.max(0, ((obj.initialMass - obj.mass) / obj.initialMass) * 100).toFixed(1);
+    $('info-lifecycle').textContent = `MASS LOSS: ${lossPct}% | CORE: ${obj.mass.toFixed(2)} M☉`;
+  } else if (obj.type === 'star') {
     const pct = Math.min(100, (obj.age / obj.lifespan) * 100).toFixed(0);
     const stageLabel = {
       main_sequence: 'MAIN SEQUENCE',
@@ -456,12 +460,23 @@ export function updateInfoPanel() {
     $('info-lifecycle').textContent = '—';
   }
 
-  $('info-tidal').textContent = (obj.tidalPercent ?? 0).toFixed(1) + '%';
+  if (isStripping) {
+    const bhDom = dom && dom.type === 'blackhole' ? dom : nearestBlackHole(obj.mesh.position).bh;
+    const rt = bhDom ? computeTidalRadius(bhDom, obj) : 0;
+    const distToBH = bhDom ? obj.mesh.position.distanceTo(bhDom.mesh.position) : r;
+    const beta = rt > 0 && distToBH > 0 ? (rt / distToBH).toFixed(2) : '—';
+    $('info-tidal').textContent = `r_t: ${(rt / 10).toFixed(2)} AU | β: ${beta}`;
+  } else {
+    $('info-tidal').textContent = (obj.tidalPercent ?? 0).toFixed(1) + '%';
+  }
+
   const hs = hillRadius(obj);
   $('info-influence').textContent = hs ? (hs.hr / 10).toFixed(2) + ' AU' : '—';
-  $('info-status').textContent = dilation < 0.999
-    ? `DILATED (${ratePct}%)`
-    : (obj.status === 'unstable' ? 'DESTABILIZING' : 'NOMINAL');
+  $('info-status').textContent = isStripping
+    ? 'TDE STRIPPING'
+    : (dilation < 0.999
+        ? `DILATED (${ratePct}%)`
+        : (obj.status === 'unstable' ? 'DESTABILIZING' : 'NOMINAL'));
 
   positionSelectionVisuals(obj.mesh.position, obj.velocity, obj.radius * 4, hs);
   fillPredictedPath(predictGeo, obj.mesh.position, obj.velocity);

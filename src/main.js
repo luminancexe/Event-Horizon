@@ -39,7 +39,7 @@ import {
   updateBlackHoleInteractions,
   checkBodyCollisions,
 } from './physics.js';
-import { updateFragments, updateStarLifecycle } from './effects.js';
+import { updateFragments, updateStarLifecycle, TDEStreamManager } from './effects.js';
 import { updateInfoPanel, selectionRing, velocityArrow, influenceSphere } from './selection.js';
 import { updateDebugHud, updateDebugOverlays } from './ui.js';
 import { logEvent, fmtClock } from './events.js';
@@ -62,6 +62,7 @@ createBlackHole({
 });
 
 initAsteroids(CONFIG.asteroidCount);
+state.tdeManager = new TDEStreamManager();
 
 for (let i = 0; i < 5; i++) createStar();
 
@@ -175,8 +176,16 @@ function animate() {
       const t0 = performance.now();
       updateAsteroids(subDtAst);
       updateFragments(subDtAst);
+      state.tdeManager?.update(subDtAst);
       asteroidMs += performance.now() - t0;
     }
+
+    // Active TDE count tracking
+    let activeTdes = 0;
+    for (const b of state.bodies) {
+      if (b.tdePhase === 1) activeTdes++;
+    }
+    state.activeTdeCount = activeTdes;
 
     // Stellar lifecycles and pulsar optical oscillations
     for (const b of [...state.bodies]) {

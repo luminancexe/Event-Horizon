@@ -15,7 +15,8 @@ import { CONFIG, state } from './state.js';
 import { scene } from './scene.js';
 import { logEvent, showBanner } from './events.js';
 import { cameraShake } from './camera.js';
-import { createBlackHole, createNeutronStar } from './objects.js';
+import { createBlackHole, createNeutronStar, computeTimeDilation, blackHoles, bhRadii } from './objects.js';
+import { computeTotalAcceleration } from './physics.js';
 import { spawnAsteroid } from './asteroids.js';
 import { unregisterSelectable, deselect } from './selection.js';
 
@@ -206,6 +207,362 @@ export function disintegrate(obj, bh) {
   );
 
   destroyObject(obj);
+}
+
+/* ============================================================================
+   CONTINUOUS TIDAL DISRUPTION & PLASMA STREAM MANAGER (PHASE 4: STEP 6)
+   ============================================================================ */
+
+export const MAX_STREAM_PARTICLES = 1600;
+export const MAX_ACTIVE_TDES = 4;
+
+// Persistent module-level scratch objects for zero runtime allocations
+const _scratchTdePos = new THREE.Vector3();
+const _scratchTdeVel = new THREE.Vector3();
+const _scratchTdeAcc = new THREE.Vector3();
+const _scratchTdeRVec = new THREE.Vector3();
+const _scratchTdeRHat = new THREE.Vector3();
+const _scratchTdeVHat = new THREE.Vector3();
+const _scratchTdeTHat = new THREE.Vector3();
+const _scratchTdeLeadPos = new THREE.Vector3();
+const _scratchTdeTrailPos = new THREE.Vector3();
+const _scratchTdeLeadVel = new THREE.Vector3();
+const _scratchTdeTrailVel = new THREE.Vector3();
+const _scratchTdeColor = new THREE.Color();
+const _scratchTdeDummy = new THREE.Object3D();
+const _scratchColorLead = new THREE.Color();
+const _scratchColorTrail = new THREE.Color();
+
+/**
+ * High-performance GPU-instanced stream manager for continuous relativistic
+ * tidal disruption events (TDE) and plasma debris streams.
+ *
+ * Implements:
+ * 1. Fixed-capacity pre-allocated InstancedMesh (1600 particles max).
+ * 2. Deterministic FIFO ring-buffer recycling upon pool exhaustion (zero runtime allocations).
+ * 3. Symplectic multi-black-hole gravitational and Lense-Thirring integration.
+ * 4. Relativistic proper time rate (dTau/dt) governing particle aging and thermal cooling.
+ * 5. Single-transfer atomic mass accretion to singularities + accretion flaring.
+ */
+export class TDEStreamManager {
+  constructor() {
+    this.capacity = MAX_STREAM_PARTICLES;
+    this.pPositions = new Float32Array(this.capacity * 3);
+    this.pVelocities = new Float32Array(this.capacity * 3);
+    this.pColors = new Float32Array(this.capacity * 3);
+    this.pScales = new Float32Array(this.capacity);
+    this.pAges = new Float32Array(this.capacity);
+    this.pMaxLifes = new Float32Array(this.capacity);
+    this.pMasses = new Float32Array(this.capacity);
+    this.pAlive = new Uint8Array(this.capacity);
+    this.pBHIndex = new Int32Array(this.capacity);
+
+    this.activeCount = 0;
+    this.nextRecycleIdx = 0;
+
+    // Instanced mesh geometry and bloom-compatible additive material
+    const geo = new THREE.IcosahedronGeometry(0.35, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    this.mesh = new THREE.InstancedMesh(geo, mat, this.capacity);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (this.mesh.instanceColor) {
+      this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    }
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+
+    // Initialize all instances outside camera frustum
+    _scratchTdeDummy.position.set(0, -99999, 0);
+    _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+    _scratchTdeDummy.updateMatrix();
+    for (let i = 0; i < this.capacity; i++) {
+      this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+      if (this.mesh.instanceColor) {
+        this.mesh.setColorAt(i, _scratchTdeColor.setHex(0xffffff));
+      }
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /**
+   * Finds an available particle index using priority:
+   * 1. Inactive slot (pAlive === 0)
+   * 2. Faded particle (pAges / pMaxLifes > 0.85)
+   * 3. Deterministic FIFO ring-buffer recycling
+   *
+   * @returns {number} Particle index in [0, capacity - 1].
+   */
+  allocateSlot() {
+    // 1. Search for dead slot
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.pAlive[i] === 0) return i;
+    }
+    // 2. Search for faded particle
+    for (let i = 0; i < this.capacity; i++) {
+      const idx = (this.nextRecycleIdx + i) % this.capacity;
+      if (this.pAges[idx] / Math.max(this.pMaxLifes[idx], 0.001) > 0.85) {
+        this.nextRecycleIdx = (idx + 1) % this.capacity;
+        return idx;
+      }
+    }
+    // 3. FIFO recycling
+    const idx = this.nextRecycleIdx;
+    this.nextRecycleIdx = (this.nextRecycleIdx + 1) % this.capacity;
+    return idx;
+  }
+
+  /**
+   * Emits a leading and trailing plasma packet pair from a stripping progenitor.
+   *
+   * @param {CelestialBody} body - Stripping celestial body.
+   * @param {BlackHole} bh - Attracting singularity.
+   * @param {number} dM - Stripped mass packet in simulation mass units.
+   */
+  emit(body, bh, dM) {
+    if (!CONFIG.tidalDisruptionEnabled || dM <= 0) return;
+
+    const pBody = body.mesh.position;
+    const vBody = body.velocity;
+    const pBH = bh.mesh.position;
+
+    _scratchTdeRVec.subVectors(pBody, pBH);
+    const r = _scratchTdeRVec.length();
+    if (r < 0.001) return;
+    _scratchTdeRHat.copy(_scratchTdeRVec).multiplyScalar(1 / r);
+
+    const speed = vBody.length();
+    if (speed > 0.001) {
+      _scratchTdeVHat.copy(vBody).multiplyScalar(1 / speed);
+      const vDotR = _scratchTdeVHat.dot(_scratchTdeRHat);
+      _scratchTdeTHat.copy(_scratchTdeVHat).addScaledVector(_scratchTdeRHat, -vDotR);
+      const tLen = _scratchTdeTHat.length();
+      if (tLen > 0.0001) {
+        _scratchTdeTHat.multiplyScalar(1 / tLen);
+      } else if (bh.spinDirection) {
+        _scratchTdeTHat.crossVectors(bh.spinDirection, _scratchTdeRHat).normalize();
+      } else {
+        _scratchTdeTHat.set(-_scratchTdeRHat.z, 0, _scratchTdeRHat.x).normalize();
+      }
+    } else if (bh.spinDirection) {
+      _scratchTdeTHat.crossVectors(bh.spinDirection, _scratchTdeRHat).normalize();
+    } else {
+      _scratchTdeTHat.set(-_scratchTdeRHat.z, 0, _scratchTdeRHat.x).normalize();
+    }
+
+    // Differential Keplerian orbital velocity dispersion across progenitor diameter
+    const dVTidal = 0.5 * Math.sqrt(Math.max((CONFIG.G * bh.mass) / r, 0)) * (body.radius / Math.max(r, 0.1));
+
+    // Leading packet: inner limb (closer to BH, lower energy -> leads orbit)
+    _scratchTdeLeadPos.copy(pBody).addScaledVector(_scratchTdeRHat, -0.8 * body.radius);
+    _scratchTdeLeadVel.copy(vBody).addScaledVector(_scratchTdeTHat, -dVTidal);
+
+    // Trailing packet: outer limb (farther from BH, higher energy -> lags orbit)
+    _scratchTdeTrailPos.copy(pBody).addScaledVector(_scratchTdeRHat, 0.8 * body.radius);
+    _scratchTdeTrailVel.copy(vBody).addScaledVector(_scratchTdeTHat, dVTidal);
+
+    const massPerParticle = dM * 0.5;
+    const densityMult = THREE.MathUtils.clamp(CONFIG.tdeStreamDensity || 1.0, 0.5, 2.0);
+    const maxLife = 5.5 * densityMult;
+
+    // Progenitor color base
+    const baseColorHex = body.core?.material?.color ? body.core.material.color.getHex() : (body.type === 'star' ? 0xfff2c0 : 0x88ccff);
+    _scratchColorLead.setHex(baseColorHex);
+    _scratchColorTrail.setHex(baseColorHex);
+
+    // Spawn Leading Packet
+    const iLead = this.allocateSlot();
+    this.pPositions[iLead * 3] = _scratchTdeLeadPos.x;
+    this.pPositions[iLead * 3 + 1] = _scratchTdeLeadPos.y;
+    this.pPositions[iLead * 3 + 2] = _scratchTdeLeadPos.z;
+    this.pVelocities[iLead * 3] = _scratchTdeLeadVel.x;
+    this.pVelocities[iLead * 3 + 1] = _scratchTdeLeadVel.y;
+    this.pVelocities[iLead * 3 + 2] = _scratchTdeLeadVel.z;
+    this.pColors[iLead * 3] = _scratchColorLead.r;
+    this.pColors[iLead * 3 + 1] = _scratchColorLead.g;
+    this.pColors[iLead * 3 + 2] = _scratchColorLead.b;
+    this.pScales[iLead] = Math.max(body.radius * 0.35, 0.25);
+    this.pAges[iLead] = 0;
+    this.pMaxLifes[iLead] = maxLife;
+    this.pMasses[iLead] = massPerParticle;
+    this.pAlive[iLead] = 1;
+    this.pBHIndex[iLead] = bh.id;
+
+    // Spawn Trailing Packet
+    const iTrail = this.allocateSlot();
+    this.pPositions[iTrail * 3] = _scratchTdeTrailPos.x;
+    this.pPositions[iTrail * 3 + 1] = _scratchTdeTrailPos.y;
+    this.pPositions[iTrail * 3 + 2] = _scratchTdeTrailPos.z;
+    this.pVelocities[iTrail * 3] = _scratchTdeTrailVel.x;
+    this.pVelocities[iTrail * 3 + 1] = _scratchTdeTrailVel.y;
+    this.pVelocities[iTrail * 3 + 2] = _scratchTdeTrailVel.z;
+    this.pColors[iTrail * 3] = _scratchColorTrail.r;
+    this.pColors[iTrail * 3 + 1] = _scratchColorTrail.g;
+    this.pColors[iTrail * 3 + 2] = _scratchColorTrail.b;
+    this.pScales[iTrail] = Math.max(body.radius * 0.35, 0.25);
+    this.pAges[iTrail] = 0;
+    this.pMaxLifes[iTrail] = maxLife;
+    this.pMasses[iTrail] = massPerParticle;
+    this.pAlive[iTrail] = 1;
+    this.pBHIndex[iTrail] = bh.id;
+  }
+
+  /**
+   * Emits a multi-particle burst when a progenitor core completely dissolves (Phase 2).
+   *
+   * @param {CelestialBody} body - Disrupted body.
+   * @param {BlackHole} bh - Attracting singularity.
+   */
+  emitFinalBurst(body, bh) {
+    const burstCount = 14;
+    const remainingMass = Math.max(body.mass, 0.001);
+    const dM = remainingMass / burstCount;
+    for (let k = 0; k < burstCount / 2; k++) {
+      this.emit(body, bh, dM * 2);
+    }
+    triggerDiskBurst(bh, 0.40 + body.mass * 0.01);
+    spawnEnergyRing(bh.mesh.position, body.type === 'star' ? 0xfff2c8 : 0x88ccff);
+  }
+
+  /**
+   * Advances all active stream particles over timestep dt.
+   *
+   * @param {number} dt - Timestep in simulation seconds.
+   */
+  update(dt) {
+    if (!CONFIG.tidalDisruptionEnabled && this.activeCount === 0) return;
+
+    let active = 0;
+    const bhs = blackHoles();
+    let matrixNeedsUpdate = false;
+    let colorNeedsUpdate = false;
+
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.pAlive[i] === 0) continue;
+
+      const i3 = i * 3;
+      _scratchTdePos.set(this.pPositions[i3], this.pPositions[i3 + 1], this.pPositions[i3 + 2]);
+      _scratchTdeVel.set(this.pVelocities[i3], this.pVelocities[i3 + 1], this.pVelocities[i3 + 2]);
+
+      // Relativistic time dilation rate dTau/dt
+      const properTimeRate = computeTimeDilation(_scratchTdePos, _scratchTdeVel, null);
+      this.pAges[i] += dt * Math.max(properTimeRate, 0.001);
+
+      if (this.pAges[i] >= this.pMaxLifes[i]) {
+        this.pAlive[i] = 0;
+        _scratchTdeDummy.position.set(0, -99999, 0);
+        _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+        _scratchTdeDummy.updateMatrix();
+        this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+        matrixNeedsUpdate = true;
+        continue;
+      }
+
+      // Check horizon capture against all active black holes
+      let captured = false;
+      for (const bh of bhs) {
+        const dist = _scratchTdePos.distanceTo(bh.mesh.position);
+        const radii = bhRadii(bh);
+        if (dist < radii.capture) {
+          // Atomic single-transfer accretion
+          this.pAlive[i] = 0;
+          bh.mass += this.pMasses[i];
+          triggerDiskBurst(bh, 0.04 + this.pMasses[i] * 0.02);
+          _scratchTdeDummy.position.set(0, -99999, 0);
+          _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+          _scratchTdeDummy.updateMatrix();
+          matrixNeedsUpdate = true;
+          captured = true;
+          break;
+        }
+      }
+      if (captured) continue;
+
+      // Gravitational acceleration (Newtonian direct-sum + Lense-Thirring)
+      computeTotalAcceleration(_scratchTdePos, _scratchTdeVel, null, state.bodies, _scratchTdeAcc);
+
+      // Symplectic velocity & position integration
+      _scratchTdeVel.addScaledVector(_scratchTdeAcc, dt);
+      _scratchTdePos.addScaledVector(_scratchTdeVel, dt);
+
+      this.pPositions[i3] = _scratchTdePos.x;
+      this.pPositions[i3 + 1] = _scratchTdePos.y;
+      this.pPositions[i3 + 2] = _scratchTdePos.z;
+      this.pVelocities[i3] = _scratchTdeVel.x;
+      this.pVelocities[i3 + 1] = _scratchTdeVel.y;
+      this.pVelocities[i3 + 2] = _scratchTdeVel.z;
+
+      // Thermal evolution: white/cyan -> orange/red -> fade
+      const lifeFrac = this.pAges[i] / this.pMaxLifes[i];
+      const baseR = this.pColors[i3];
+      const baseG = this.pColors[i3 + 1];
+      const baseB = this.pColors[i3 + 2];
+
+      if (lifeFrac < 0.25) {
+        // High-energy initial state: white-hot boost
+        _scratchTdeColor.setRGB(
+          Math.min(1.0, baseR * 1.3 + 0.3),
+          Math.min(1.0, baseG * 1.3 + 0.3),
+          Math.min(1.0, baseB * 1.3 + 0.4)
+        );
+      } else if (lifeFrac < 0.65) {
+        // Radiative cooling: warm orange/gold
+        const t = (lifeFrac - 0.25) / 0.40;
+        _scratchTdeColor.setRGB(
+          baseR * (1 - t * 0.2),
+          baseG * (1 - t * 0.5),
+          baseB * (1 - t * 0.8)
+        );
+      } else {
+        // Dissipating tail: deep red cooling
+        const t = (lifeFrac - 0.65) / 0.35;
+        _scratchTdeColor.setRGB(
+          baseR * (0.8 - t * 0.5),
+          baseG * (0.5 - t * 0.4),
+          baseB * (0.2 - t * 0.2)
+        );
+      }
+
+      const scale = this.pScales[i] * (1.0 - lifeFrac * 0.45);
+      _scratchTdeDummy.position.copy(_scratchTdePos);
+      _scratchTdeDummy.scale.set(scale, scale, scale);
+      _scratchTdeDummy.updateMatrix();
+      this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+      if (this.mesh.instanceColor) {
+        this.mesh.setColorAt(i, _scratchTdeColor);
+        colorNeedsUpdate = true;
+      }
+      matrixNeedsUpdate = true;
+      active++;
+    }
+
+    this.activeCount = active;
+    if (matrixNeedsUpdate) this.mesh.instanceMatrix.needsUpdate = true;
+    if (colorNeedsUpdate && this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+  }
+
+  /**
+   * Resets all particle states and clears instances.
+   */
+  clear() {
+    this.pAlive.fill(0);
+    this.pAges.fill(0);
+    this.activeCount = 0;
+    _scratchTdeDummy.position.set(0, -99999, 0);
+    _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+    _scratchTdeDummy.updateMatrix();
+    for (let i = 0; i < this.capacity; i++) {
+      this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
 }
 
 /* ============================================================================

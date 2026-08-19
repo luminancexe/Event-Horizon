@@ -48,6 +48,10 @@ export function updateDebugHud() {
   $('dbg-gravcalcs').textContent = state.gravityCalcCount.toLocaleString();
   const elLenses = $('dbg-lenses');
   if (elLenses) elLenses.textContent = state.activeLensesCount ?? 0;
+  const elDbgTde = $('dbg-tde');
+  if (elDbgTde && state.tdeManager) {
+    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)`;
+  }
   $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
   $('dbg-substeps').textContent = state.lastSubsteps;
 
@@ -555,6 +559,25 @@ document.getElementById('btn-doppler-toggle').addEventListener('click', () => {
   logEvent(`Relativistic Doppler beaming ${CONFIG.dopplerBeamingEnabled ? 'enabled' : 'disabled'}.`, 'info');
 });
 
+const btnTde = document.getElementById('btn-tde-toggle');
+if (btnTde) {
+  btnTde.addEventListener('click', () => {
+    CONFIG.tidalDisruptionEnabled = !CONFIG.tidalDisruptionEnabled;
+    btnTde.textContent = CONFIG.tidalDisruptionEnabled ? '\u25cf TIDAL STREAMS: ON' : '\u25cb TIDAL STREAMS: OFF';
+    btnTde.classList.toggle('off', !CONFIG.tidalDisruptionEnabled);
+    logEvent(`Tidal disruption streams ${CONFIG.tidalDisruptionEnabled ? 'enabled' : 'disabled'}.`, 'info');
+  });
+}
+
+const sliderTdeDensity = document.getElementById('slider-tde-density');
+if (sliderTdeDensity) {
+  sliderTdeDensity.addEventListener('input', (e) => {
+    CONFIG.tdeStreamDensity = parseFloat(e.target.value);
+    const valEl = document.getElementById('val-tde-density');
+    if (valEl) valEl.textContent = CONFIG.tdeStreamDensity.toFixed(1);
+  });
+}
+
 document.getElementById('btn-debug').addEventListener('click', () => {
   CONFIG.debugMode = !CONFIG.debugMode;
   document.getElementById('debug-hud').classList.toggle('hidden', !CONFIG.debugMode);
@@ -602,6 +625,7 @@ export function syncUIFromConfig() {
   setSlider('slider-lens', 'val-lens', CONFIG.lensStrength, 2);
   setSlider('slider-substep', 'val-substep', CONFIG.maxSubstep, 2);
   setSlider('slider-traillen', 'val-traillen', CONFIG.trailLength, 0);
+  setSlider('slider-tde-density', 'val-tde-density', CONFIG.tdeStreamDensity ?? 1.0, 1);
 
   const gravBtn = document.getElementById('btn-gravity-toggle');
   if (gravBtn) {
@@ -631,6 +655,12 @@ export function syncUIFromConfig() {
   if (dopplerBtn) {
     dopplerBtn.textContent = CONFIG.dopplerBeamingEnabled ? '\u25cf DOPPLER BEAMING: ON' : '\u25cb DOPPLER BEAMING: OFF';
     dopplerBtn.classList.toggle('off', !CONFIG.dopplerBeamingEnabled);
+  }
+
+  const tdeBtn = document.getElementById('btn-tde-toggle');
+  if (tdeBtn) {
+    tdeBtn.textContent = CONFIG.tidalDisruptionEnabled ? '\u25cf TIDAL STREAMS: ON' : '\u25cb TIDAL STREAMS: OFF';
+    tdeBtn.classList.toggle('off', !CONFIG.tidalDisruptionEnabled);
   }
 
   const trailBtn = document.getElementById('btn-trails-toggle');

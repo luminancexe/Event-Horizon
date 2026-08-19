@@ -54,6 +54,7 @@
       <div class="debug-row"><span>FRAGMENTS</span><b id="dbg-fragments">-</b></div>
       <div class="debug-row"><span>GRAVITY CALCS/F</span><b id="dbg-gravcalcs">-</b></div>
       <div class="debug-row"><span>ACTIVE LENSES</span><b id="dbg-lenses">0</b></div>
+      <div class="debug-row"><span>TDE PARTICLES</span><b id="dbg-tde">0 / 1600</b></div>
       <div class="debug-row"><span>SIM SPEED</span><b id="dbg-speed">-</b></div>
       <div class="debug-row"><span>SUB-STEPS</span><b id="dbg-substeps">-</b></div>
       <div class="debug-row divider"><span>SELECTED OBJECT</span></div>
@@ -136,6 +137,11 @@
       </label>
       <button id="btn-lensing-toggle" class="wide-btn active-toggle" title="Toggle multi-singularity relativistic gravitational lensing post-processing distortion.">&#9679; GRAVITATIONAL LENSING: ON</button>
       <button id="btn-doppler-toggle" class="wide-btn active-toggle" title="Toggle Kerr relativistic accretion disk Doppler boosting and gravitational redshift.">&#9679; DOPPLER BEAMING: ON</button>
+      <button id="btn-tde-toggle" class="wide-btn active-toggle" title="Toggle continuous relativistic tidal disruption and plasma debris stream simulation.">&#9679; TIDAL STREAMS: ON</button>
+      <label class="slider-row" title="Relative particle emission density and mass-shedding rate for tidal disruption events.">
+        <span>STREAM DENSITY</span><span class="val" id="val-tde-density">1.0</span>
+        <input type="range" id="slider-tde-density" min="0.5" max="2.0" step="0.1" value="1.0">
+      </label>
       <button id="btn-trails-toggle" class="wide-btn active-toggle" title="Show or hide every object's motion trail (independent of the Debug HUD's own path overlay).">&#9679; TRAILS: ON</button>
       <label class="slider-row" title="How many points of history each trail keeps. Longer trails cost a little more to update.">
         <span>TRAIL LENGTH</span><span class="val" id="val-traillen">140</span>

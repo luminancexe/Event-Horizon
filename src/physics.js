@@ -54,6 +54,9 @@ const _rHat = new THREE.Vector3();
 const _bgVec = new THREE.Vector3();
 const _ltAcc = new THREE.Vector3();
 const _scratchLT = new THREE.Vector3();
+const _scratchTidalRel = new THREE.Vector3();
+const _scratchTidalTangent = new THREE.Vector3();
+const _scratchTidalLook = new THREE.Vector3();
 
 /* ============================================================================
    N-BODY GRAVITATIONAL & RELATIVISTIC ACCELERATION SOLVERS
@@ -289,12 +292,33 @@ export function postStepBody(obj, dt) {
   const { bh, dist: r } = nearestBlackHole(pos);
 
   if (bh) {
-    const radii = bhRadii(bh);
+    const radii = bhRadii(bh, obj);
 
-    // 1. Event horizon crossing -> Tidal disruption and consumption
-    if (r < radii.capture) {
-      disintegrate(obj, bh);
-      return;
+    // 1. Hills compact-object plunge limit / TDE-disabled fallback vs Continuous TDE
+    const isCompactPlunge = radii.tidal <= radii.capture;
+
+    if (!CONFIG.tidalDisruptionEnabled || isCompactPlunge) {
+      // Direct horizon crossing -> catastrophic destruction
+      if (r < radii.capture) {
+        disintegrate(obj, bh);
+        return;
+      }
+    } else {
+      // Continuous TDE regime (r_t > r_capture)
+      // Core dissolution (Phase 2) or direct plunge
+      if (r < radii.capture || obj.mass <= 0.05 * (obj.initialMass || obj.mass)) {
+        if (obj.tdePhase === 1) {
+          obj.tdePhase = 2;
+          state.tdeManager?.emitFinalBurst(obj, bh);
+          logEvent(`Tidal disruption complete: ${obj.name} fully dissolved into plasma streams.`, 'critical', pos);
+          showBanner(`TIDAL DISRUPTION COMPLETE: ${obj.name}`);
+          destroyObject(obj);
+          return;
+        } else if (r < radii.capture) {
+          disintegrate(obj, bh);
+          return;
+        }
+      }
     }
 
     // 2. Accretion disk hydrodynamic drag
@@ -308,13 +332,41 @@ export function postStepBody(obj, dt) {
       obj.velocity.z += (Math.random() - 0.5) * 0.05;
     }
 
-    // 3. Roche limit tidal stress and physical elongation
+    // 3. Roche limit tidal stress, mass shedding, and physical elongation
     if (r < radii.tidal) {
       obj.tidalPercent = THREE.MathUtils.clamp(
-        (100 * (radii.tidal - r)) / (radii.tidal - radii.capture),
+        (100 * (radii.tidal - r)) / Math.max(radii.tidal - radii.capture, 0.001),
         0,
         100
       );
+
+      // Continuous TDE mass loss and stream emission (Phase 1: STRIPPING)
+      if (CONFIG.tidalDisruptionEnabled && !isCompactPlunge) {
+        if (obj.tdePhase === 0) {
+          obj.tdePhase = 1;
+          obj.initialMass = obj.initialMass || obj.mass;
+          obj.disruptedMass = obj.disruptedMass || 0;
+          obj._initialRadius = obj._initialRadius || obj.radius;
+          logEvent(`Tidal disruption event initiated: ${obj.name} is shedding outer layers.`, 'critical', pos);
+          showBanner(`TIDAL DISRUPTION INITIATED: ${obj.name}`);
+        }
+
+        const kStrip = 0.45;
+        const properTimeRate = obj.timeDilation !== undefined ? obj.timeDilation : 1.0;
+        const frac = (radii.tidal - r) / radii.tidal;
+        const dM = Math.min(
+          obj.mass,
+          (obj.initialMass || obj.mass) * kStrip * (frac * frac) * properTimeRate * dt * (CONFIG.tdeStreamDensity || 1.0)
+        );
+
+        if (dM > 0) {
+          obj.mass = Math.max(0, obj.mass - dM);
+          obj.disruptedMass = (obj.disruptedMass || 0) + dM;
+          const massRatio = Math.max(0.01, obj.mass / (obj.initialMass || obj.mass));
+          obj.radius = (obj._initialRadius || obj.radius) * Math.cbrt(massRatio);
+          state.tdeManager?.emit(obj, bh, dM);
+        }
+      }
 
       if (obj.status !== 'unstable') {
         obj.status = 'unstable';
@@ -322,16 +374,18 @@ export function postStepBody(obj, dt) {
         if (obj.type === 'planet') showBanner('PLANETARY BODY DESTABILIZED');
       }
 
-      // Deform mesh along tangential trajectory to simulate tidal stretching
+      // Deform mesh along tangential trajectory using persistent zero-allocation scratch vectors
       const k = 1 - r / radii.tidal;
       const stretch = 1 + k * 2.2;
-      const base = obj.lifecycleScale || 1;
-      const rel = pos.clone().sub(bh.mesh.position);
-      const tangent = new THREE.Vector3(-rel.z, 0, rel.x).normalize();
+      const massRatio = obj.initialMass ? obj.mass / obj.initialMass : 1.0;
+      const base = (obj.lifecycleScale || 1) * Math.cbrt(Math.max(massRatio, 0.05));
+      _scratchTidalRel.subVectors(pos, bh.mesh.position);
+      _scratchTidalTangent.set(-_scratchTidalRel.z, 0, _scratchTidalRel.x).normalize();
 
-      obj.mesh.up.copy(tangent);
+      obj.mesh.up.copy(_scratchTidalTangent);
       obj.core.scale.set(base / Math.sqrt(stretch), base * stretch, base / Math.sqrt(stretch));
-      obj.core.lookAt(pos.clone().add(tangent));
+      _scratchTidalLook.addVectors(pos, _scratchTidalTangent);
+      obj.core.lookAt(_scratchTidalLook);
 
       if (!obj.lastLog.tidal || state.simTime - obj.lastLog.tidal > 3) {
         logEvent(
@@ -347,7 +401,9 @@ export function postStepBody(obj, dt) {
 
       if (obj.status === 'unstable' && r > radii.tidal * 1.15) {
         obj.status = 'stable';
-        obj.core.scale.setScalar(obj.lifecycleScale || 1);
+        const massRatio = obj.initialMass ? obj.mass / obj.initialMass : 1.0;
+        const base = (obj.lifecycleScale || 1) * Math.cbrt(Math.max(massRatio, 0.05));
+        obj.core.scale.setScalar(base);
         obj.core.rotation.set(0, 0, 0);
       }
     }

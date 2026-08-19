@@ -40,6 +40,7 @@ import { refreshObjectBrowser, syncUIFromConfig } from './ui.js';
 export function clearUniverse() {
   for (const b of [...state.bodies]) destroyObject(b);
   clearFragments();
+  state.tdeManager?.clear();
   initAsteroids(0);
   deselect();
   state.followTarget = null;
@@ -187,6 +188,9 @@ export function serializeUniverse() {
       isHighMass: b.isHighMass,
       stage: b.stage,
       lifecycleScale: b.lifecycleScale,
+      tdePhase: b.tdePhase ?? 0,
+      initialMass: b.initialMass ?? b.mass,
+      disruptedMass: b.disruptedMass ?? 0,
       color: b.core?.material?.color ? b.core.material.color.getHex() : undefined,
       glowColor: b.glow?.material?.color ? b.glow.material.color.getHex() : undefined,
       __wasSelected: b === state.selected || undefined,
@@ -217,6 +221,9 @@ function restoreBody(bd) {
     size: bd.radius,
     name: bd.name,
     tempK: bd.tempK,
+    tdePhase: bd.tdePhase ?? 0,
+    initialMass: bd.initialMass ?? bd.mass,
+    disruptedMass: bd.disruptedMass ?? 0,
   };
 
   let obj = null;
@@ -240,6 +247,11 @@ function restoreBody(bd) {
 
   obj.age = bd.age ?? 0;
   obj.properTime = bd.properTime ?? (bd.age ? bd.age / AGE_YEARS_PER_SIMSECOND : 0);
+  obj.tdePhase = bd.tdePhase ?? 0;
+  obj.initialMass = bd.initialMass ?? bd.mass;
+  obj.disruptedMass = bd.disruptedMass ?? 0;
+  obj._initialRadius = bd.radius;
+
   if (bd.type === 'star') {
     obj.stage = bd.stage || 'main_sequence';
     obj.lifecycleScale = bd.lifecycleScale ?? 1;
@@ -267,6 +279,7 @@ const CONFIG_BOUNDS = {
   trailLength: [20, 400],
   maxSubstep: [0.02, 0.3],
   timeScale: [0.1, 1000],
+  tdeStreamDensity: [0.5, 2.0],
 };
 
 /**
