@@ -83,8 +83,13 @@ function serializeUniverse() {
   if (state.selected?.isAsteroid) selectedMarker = { kind: 'asteroid', index: state.selected.index };
   else if (state.selected) selectedMarker = { kind: 'body' }; // which body gets tagged below via __wasSelected
 
+  // build a lookup from body reference → index-in-save-array so that
+  // parent/child relationships can be stored as stable integer indices
+  const bodyIndex = new Map();
+  state.bodies.forEach((b, i) => bodyIndex.set(b, i));
+
   return {
-    version: 2,
+    version: 3,
     config: { ...CONFIG },
     simTime: state.simTime, simYears: state.simYears,
     cameraMode: state.cameraMode,
@@ -100,6 +105,10 @@ function serializeUniverse() {
       color: b.core?.material?.color ? b.core.material.color.getHex() : undefined,
       glowColor: b.glow?.material?.color ? b.glow.material.color.getHex() : undefined,
       __wasSelected: b === state.selected || undefined,
+      // parent/child relationship: saved as the parent's index in this
+      // same bodies array (-1 or absent means no parent). Children are
+      // derived from parentIndex on load, so they don't need storing.
+      parentIndex: b.parent ? bodyIndex.get(b.parent) ?? -1 : -1,
     })),
     asteroids: { pos: state.aPos.map((p) => [p.x, p.y, p.z]), vel: state.aVel.map((v) => [v.x, v.y, v.z]), mass: state.aMass.slice(), radius: state.aRadius.slice() },
   };
@@ -158,11 +167,39 @@ function deserializeUniverse(data) {
   state.simTime = data.simTime || 0;
   state.simYears = data.simYears || 0;
 
-  const sorted = [...(data.bodies || [])].sort((a, b) => (a.type === 'blackhole' ? -1 : 0) - (b.type === 'blackhole' ? -1 : 0));
+  // --- Phase 1: recreate every body (black holes first so gravity is stable) ---
+  // Tag each entry with its original position in the save array *before*
+  // sorting, so parentIndex references (which use original positions) resolve
+  // correctly regardless of creation order.
+  const rawBodies = data.bodies || [];
+  rawBodies.forEach((bd, i) => { bd._origIndex = i; });
+  const sorted = [...rawBodies].sort((a, b) => (a.type === 'blackhole' ? -1 : 0) - (b.type === 'blackhole' ? -1 : 0));
+  // Keep a map from original save-array index → restored object so that
+  // parent/child links can be reconnected in a second pass.
+  const origIndexToObj = new Map();
   let restoredSelection = null;
   for (const bd of sorted) {
     const obj = restoreBody(bd);
-    if (obj && bd.__wasSelected) restoredSelection = obj;
+    if (!obj) continue;
+    origIndexToObj.set(bd._origIndex, obj);
+    if (bd.__wasSelected) restoredSelection = obj;
+  }
+
+  // --- Phase 2: restore parent/child relationships ---
+  // parentIndex values reference positions in the original (unsorted) bodies
+  // array. We tagged each entry with _origIndex before sorting so the lookup
+  // works regardless of creation order.
+  for (const bd of sorted) {
+    const parentIdx = bd.parentIndex ?? -1;
+    if (parentIdx < 0) continue;
+    const child = origIndexToObj.get(bd._origIndex);
+    const parent = origIndexToObj.get(parentIdx);
+    if (!child || !parent || child === parent) continue;
+    // guard against duplicates (constructor may have already linked if
+    // parent was passed at creation time — it wasn't, but be safe)
+    if (child.parent) continue;
+    child.parent = parent;
+    if (!parent.children.includes(child)) parent.children.push(child);
   }
 
   if (data.asteroids?.pos?.length) {
