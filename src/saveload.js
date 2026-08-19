@@ -287,6 +287,9 @@ const CONFIG_BOUNDS = {
   tdeStreamDensity: [0.5, 2.0],
   tdeViscousTimescale: [0.5, 60.0],
   tdeDiskThickness: [0.1, 5.0],
+  tdeCircularizationTimescale: [0.2, 10.0],
+  tdeCircVelocityThreshold: [0.01, 0.5],
+  tdeMaxCircularizationTime: [0.5, 20.0],
 };
 
 /**

@@ -24,6 +24,9 @@ export const CONFIG = {
   tdeStreamDensity: 1.0,     // Tidal disruption stream particle emission density multiplier (0.5x - 2.0x)
   tdeViscousTimescale: 6.0,  // Viscous accretion timescale (simulation seconds) for disk -> BH mass transfer
   tdeDiskThickness: 1.2,     // Effective accretion disk half-thickness for stream-disk swept intersection
+  tdeCircularizationTimescale: 1.5, // Time constant (simulation seconds) for circularization velocity damping
+  tdeCircVelocityThreshold: 0.08,  // Relative velocity ratio threshold (|v_rel| / v_circ) for circularization completion
+  tdeMaxCircularizationTime: 3.5,   // Maximum duration (simulation seconds) for circularizing state before disk assimilation
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch

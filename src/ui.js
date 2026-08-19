@@ -56,8 +56,13 @@ export function updateDebugHud() {
         totalDiskMass += b.diskMass;
       }
     }
+    let circCount = 0;
+    for (let i = 0; i < state.tdeManager.capacity; i++) {
+      if (state.tdeManager.pAlive[i] && state.tdeManager.pPhase[i] === 1) circCount++;
+    }
     const diskStr = totalDiskMass > 0 ? ` | M_disk: ${totalDiskMass.toFixed(1)} M☉` : '';
-    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)${diskStr}`;
+    const circStr = circCount > 0 ? ` [${circCount} circ]` : '';
+    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)${circStr}${diskStr}`;
   }
   $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
   $('dbg-substeps').textContent = state.lastSubsteps;

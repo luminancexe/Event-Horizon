@@ -622,6 +622,32 @@ export class BlackHole extends CelestialBody {
   }
 
   /**
+   * Derived thin-disk characteristic temperature (Kelvin, simulation scale):
+   *   T_disk ~ T_base * (M_BH * M_dot / r_ISCO^3)^(1/4)
+   * @returns {number}
+   */
+  get diskTemperature() {
+    if (this.diskMass <= 0 || !this.diskMat) return 0;
+    const mDot = this.accretionRate;
+    if (mDot <= 0) return 0;
+    const rISCO = Math.max(this.iscoRadius, 1.0);
+    const fluxFactor = (this.mass * mDot) / (rISCO * rISCO * rISCO);
+    const tScaled = 2.5e6 * Math.pow(Math.max(fluxFactor, 0), 0.25);
+    return Math.min(Math.max(tScaled, 1e4), 5e7);
+  }
+
+  /**
+   * Approximate angular momentum stored in the accretion disk reservoir:
+   *   L_disk ~ M_disk * sqrt(G * M_BH * r_circ)
+   * @returns {number}
+   */
+  get diskAngularMomentum() {
+    if (this.diskMass <= 0) return 0;
+    const rCirc = this.visualRadius * 2.5;
+    return this.diskMass * Math.sqrt(Math.max(CONFIG.G * this.mass * rCirc, 0));
+  }
+
+  /**
    * Dynamic visual horizon radius in simulation distance units, synchronized with mass growth.
    * @returns {number}
    */

@@ -216,6 +216,10 @@ export function disintegrate(obj, bh) {
 export const MAX_STREAM_PARTICLES = 1600;
 export const MAX_ACTIVE_TDES = 4;
 
+export const TDE_STREAM_FREE = 0;
+export const TDE_STREAM_CIRCULARIZING = 1;
+export const TDE_STREAM_INACTIVE = 2;
+
 // Persistent module-level scratch objects for zero runtime allocations
 const _scratchTdePos = new THREE.Vector3();
 const _scratchTdeVel = new THREE.Vector3();
@@ -234,6 +238,11 @@ const _scratchColorLead = new THREE.Color();
 const _scratchColorTrail = new THREE.Color();
 const _scratchDiskNormal = new THREE.Vector3();
 const _scratchDiskRel = new THREE.Vector3();
+const _scratchDiskProj = new THREE.Vector3();
+const _scratchDiskRHat = new THREE.Vector3();
+const _scratchDiskTHat = new THREE.Vector3();
+const _scratchDiskTargetVel = new THREE.Vector3();
+const _scratchDiskRelVel = new THREE.Vector3();
 
 /**
  * High-performance GPU-instanced stream manager for continuous relativistic
@@ -244,7 +253,7 @@ const _scratchDiskRel = new THREE.Vector3();
  * 2. Deterministic FIFO ring-buffer recycling upon pool exhaustion (zero runtime allocations).
  * 3. Symplectic multi-black-hole gravitational and Lense-Thirring integration.
  * 4. Relativistic proper time rate (dTau/dt) governing particle aging and thermal cooling.
- * 5. Swept disk-plane intersection and circularization with atomic mass transfer to disk reservoir.
+ * 5. Swept disk-plane collision, relative velocity shock dissipation, and exponential circularization.
  * 6. Single-transfer atomic mass accretion to singularities + accretion flaring.
  * 7. Ejecta mass tracking for uncaptured particles to maintain 5-component conservation.
  */
@@ -261,6 +270,9 @@ export class TDEStreamManager {
     this.pAlive = new Uint8Array(this.capacity);
     this.pBHIndex = new Int32Array(this.capacity);
     this.pPrevH = new Float32Array(this.capacity);
+    this.pPhase = new Uint8Array(this.capacity);
+    this.pCircTimers = new Float32Array(this.capacity);
+    this.pImpactRadii = new Float32Array(this.capacity);
 
     this.activeCount = 0;
     this.nextRecycleIdx = 0;
@@ -310,6 +322,9 @@ export class TDEStreamManager {
     for (let i = 0; i < this.capacity; i++) {
       if (this.pAlive[i] === 0) {
         this.pPrevH[i] = 0;
+        this.pPhase[i] = TDE_STREAM_FREE;
+        this.pCircTimers[i] = 0;
+        this.pImpactRadii[i] = 0;
         return i;
       }
     }
@@ -319,6 +334,9 @@ export class TDEStreamManager {
       if (this.pAges[idx] / Math.max(this.pMaxLifes[idx], 0.001) > 0.85) {
         this.nextRecycleIdx = (idx + 1) % this.capacity;
         this.pPrevH[idx] = 0;
+        this.pPhase[idx] = TDE_STREAM_FREE;
+        this.pCircTimers[idx] = 0;
+        this.pImpactRadii[idx] = 0;
         return idx;
       }
     }
@@ -326,6 +344,9 @@ export class TDEStreamManager {
     const idx = this.nextRecycleIdx;
     this.nextRecycleIdx = (this.nextRecycleIdx + 1) % this.capacity;
     this.pPrevH[idx] = 0;
+    this.pPhase[idx] = TDE_STREAM_FREE;
+    this.pCircTimers[idx] = 0;
+    this.pImpactRadii[idx] = 0;
     return idx;
   }
 
@@ -406,6 +427,9 @@ export class TDEStreamManager {
     this.pMasses[iLead] = massPerParticle;
     this.pAlive[iLead] = 1;
     this.pBHIndex[iLead] = bh.id;
+    this.pPhase[iLead] = TDE_STREAM_FREE;
+    this.pCircTimers[iLead] = 0;
+    this.pImpactRadii[iLead] = 0;
     _scratchDiskRel.subVectors(_scratchTdeLeadPos, pBH);
     this.pPrevH[iLead] = _scratchDiskRel.dot(_scratchDiskNormal);
 
@@ -426,6 +450,9 @@ export class TDEStreamManager {
     this.pMasses[iTrail] = massPerParticle;
     this.pAlive[iTrail] = 1;
     this.pBHIndex[iTrail] = bh.id;
+    this.pPhase[iTrail] = TDE_STREAM_FREE;
+    this.pCircTimers[iTrail] = 0;
+    this.pImpactRadii[iTrail] = 0;
     _scratchDiskRel.subVectors(_scratchTdeTrailPos, pBH);
     this.pPrevH[iTrail] = _scratchDiskRel.dot(_scratchDiskNormal);
   }
@@ -449,7 +476,8 @@ export class TDEStreamManager {
 
   /**
    * Advances all active stream particles over timestep dt.
-   * Handles multi-singularity gravity, proper time aging, swept disk intersection,
+   * Handles multi-singularity gravity, proper time aging, swept disk collision,
+   * relative velocity shock dissipation, exponential circularization,
    * atomic disk mass transfer, horizon capture, and ejecta tracking.
    *
    * @param {number} dt - Timestep in simulation seconds.
@@ -473,7 +501,7 @@ export class TDEStreamManager {
       const properTimeRate = computeTimeDilation(_scratchTdePos, _scratchTdeVel, null);
       this.pAges[i] += dt * Math.max(properTimeRate, 0.001);
 
-      // 1. Check horizon capture against all active black holes
+      // 1. Check horizon capture against all active black holes (PRIORITY 1)
       let captured = false;
       for (const bh of bhs) {
         const dist = _scratchTdePos.distanceTo(bh.mesh.position);
@@ -481,6 +509,7 @@ export class TDEStreamManager {
         if (dist < radii.capture) {
           // Atomic direct horizon accretion
           this.pAlive[i] = 0;
+          this.pPhase[i] = TDE_STREAM_INACTIVE;
           const dm = this.pMasses[i];
           this.pMasses[i] = 0;
           bh.mass += dm;
@@ -497,7 +526,7 @@ export class TDEStreamManager {
       }
       if (captured) continue;
 
-      // 2. Check swept accretion disk plane intersection & circularization
+      // 2. Stream-Disk Collision & Circularization Evolution (PRIORITY 2)
       let targetBh = null;
       for (const b of bhs) {
         if (b.id === this.pBHIndex[i]) {
@@ -521,32 +550,86 @@ export class TDEStreamManager {
         const rInner = targetBh.visualRadius * (1.0 + 0.20 * iscoNorm);
         const rOuter = targetBh.visualRadius * (targetBh.diskScale || 6.5);
 
-        // Swept crossing test across disk plane within disk radial annulus
-        const sweptCrossing =
-          (hPrev * hCurr <= 0 && (Math.abs(hPrev) > 0.0001 || Math.abs(hCurr) > 0.0001)) ||
-          Math.abs(hCurr) <= hThick;
-
-        if (sweptCrossing && rPlane >= rInner && rPlane <= rOuter) {
-          // Stream -> Disk atomic transfer with shock dissipation
-          this.pAlive[i] = 0;
-          const dm = this.pMasses[i];
-          this.pMasses[i] = 0;
-          targetBh.diskMass = (targetBh.diskMass || 0) + dm;
-          triggerDiskBurst(targetBh, 0.08 + dm * 0.05);
-
-          _scratchTdeDummy.position.set(0, -99999, 0);
-          _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
-          _scratchTdeDummy.updateMatrix();
-          this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
-          matrixNeedsUpdate = true;
-          continue;
+        // Calculate circular Keplerian velocity vector in the disk plane
+        _scratchDiskProj.copy(_scratchDiskRel).addScaledVector(_scratchDiskNormal, -hCurr);
+        const projLen = _scratchDiskProj.length();
+        if (projLen > 0.001) {
+          _scratchDiskRHat.copy(_scratchDiskProj).multiplyScalar(1 / projLen);
+          _scratchDiskTHat.crossVectors(_scratchDiskNormal, _scratchDiskRHat).normalize();
+          // Preserve orbital motion direction (prograde vs retrograde relative to disk spin)
+          if (_scratchTdeVel.dot(_scratchDiskTHat) < 0) {
+            _scratchDiskTHat.multiplyScalar(-1);
+          }
+        } else {
+          _scratchDiskTHat.set(1, 0, 0);
         }
-        this.pPrevH[i] = hCurr;
+
+        const vCircSpeed = Math.sqrt(Math.max((CONFIG.G * targetBh.mass) / Math.max(rPlane, 0.1), 0));
+        _scratchDiskTargetVel.copy(_scratchDiskTHat).multiplyScalar(vCircSpeed);
+        _scratchDiskRelVel.subVectors(_scratchTdeVel, _scratchDiskTargetVel);
+
+        // A. Initial Impact Detection for FREE_STREAM packets
+        if (this.pPhase[i] === TDE_STREAM_FREE) {
+          const sweptCrossing =
+            (hPrev * hCurr <= 0 && (Math.abs(hPrev) > 0.0001 || Math.abs(hCurr) > 0.0001)) ||
+            Math.abs(hCurr) <= hThick;
+
+          if (sweptCrossing && rPlane >= rInner && rPlane <= rOuter) {
+            // Transition to CIRCULARIZING
+            this.pPhase[i] = TDE_STREAM_CIRCULARIZING;
+            this.pCircTimers[i] = 0;
+            this.pImpactRadii[i] = rPlane;
+
+            // Approximate kinetic energy dissipated in the initial stream-disk shock
+            const dm = this.pMasses[i];
+            const eShock = 0.5 * dm * _scratchDiskRelVel.lengthSq();
+            const burstMag = 0.05 + Math.min(0.35, (eShock / 2000.0) * 0.08 + dm * 0.03);
+            triggerDiskBurst(targetBh, burstMag);
+          }
+          this.pPrevH[i] = hCurr;
+        }
+
+        // B. Process ongoing CIRCULARIZING state
+        if (this.pPhase[i] === TDE_STREAM_CIRCULARIZING) {
+          this.pCircTimers[i] += dt;
+          const tauCirc = CONFIG.tdeCircularizationTimescale || 1.5;
+          const alpha = 1.0 - Math.exp(-dt / Math.max(tauCirc, 0.01));
+
+          // Exponentially damp velocity toward circular Keplerian velocity
+          _scratchTdeVel.addScaledVector(_scratchDiskRelVel, -alpha);
+
+          // Damp out-of-plane normal velocity toward disk plane
+          const vNormal = _scratchTdeVel.dot(_scratchDiskNormal);
+          _scratchTdeVel.addScaledVector(_scratchDiskNormal, -vNormal * alpha);
+
+          // Check circularization completion
+          const relSpeed = _scratchDiskRelVel.length();
+          const relRatio = relSpeed / Math.max(vCircSpeed, 0.01);
+          const vThresh = CONFIG.tdeCircVelocityThreshold || 0.08;
+          const maxCircTime = CONFIG.tdeMaxCircularizationTime || 3.5;
+
+          if (relRatio <= vThresh || this.pCircTimers[i] >= maxCircTime || rPlane < rInner) {
+            // Circularization complete -> Atomic transfer to disk mass reservoir
+            this.pAlive[i] = 0;
+            this.pPhase[i] = TDE_STREAM_INACTIVE;
+            const dm = this.pMasses[i];
+            this.pMasses[i] = 0;
+            targetBh.diskMass = (targetBh.diskMass || 0) + dm;
+
+            _scratchTdeDummy.position.set(0, -99999, 0);
+            _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);
+            _scratchTdeDummy.updateMatrix();
+            this.mesh.setMatrixAt(i, _scratchTdeDummy.matrix);
+            matrixNeedsUpdate = true;
+            continue;
+          }
+        }
       }
 
-      // 3. Check expiration / ejecta escape
+      // 3. Check expiration / ejecta escape (PRIORITY 3)
       if (this.pAges[i] >= this.pMaxLifes[i]) {
         this.pAlive[i] = 0;
+        this.pPhase[i] = TDE_STREAM_INACTIVE;
         const dm = this.pMasses[i];
         this.pMasses[i] = 0;
         state.tdeEjectaMass = (state.tdeEjectaMass || 0) + dm;
@@ -558,11 +641,12 @@ export class TDEStreamManager {
         continue;
       }
 
-      // 4. Gravitational acceleration (Newtonian direct-sum + Lense-Thirring)
-      computeTotalAcceleration(_scratchTdePos, _scratchTdeVel, null, state.bodies, _scratchTdeAcc);
-
-      // Symplectic velocity & position integration
-      _scratchTdeVel.addScaledVector(_scratchTdeAcc, dt);
+      // 4. Integration & Trajectory Advancement (PRIORITY 4)
+      if (this.pPhase[i] === TDE_STREAM_FREE) {
+        // Gravitational acceleration (Newtonian direct-sum + Lense-Thirring)
+        computeTotalAcceleration(_scratchTdePos, _scratchTdeVel, null, state.bodies, _scratchTdeAcc);
+        _scratchTdeVel.addScaledVector(_scratchTdeAcc, dt);
+      }
       _scratchTdePos.addScaledVector(_scratchTdeVel, dt);
 
       this.pPositions[i3] = _scratchTdePos.x;
@@ -572,13 +656,20 @@ export class TDEStreamManager {
       this.pVelocities[i3 + 1] = _scratchTdeVel.y;
       this.pVelocities[i3 + 2] = _scratchTdeVel.z;
 
-      // Thermal evolution: white/cyan -> orange/red -> fade
+      // Thermal evolution: white/cyan -> orange/red -> fade, with shock-boost for circularizing packets
       const lifeFrac = this.pAges[i] / this.pMaxLifes[i];
       const baseR = this.pColors[i3];
       const baseG = this.pColors[i3 + 1];
       const baseB = this.pColors[i3 + 2];
 
-      if (lifeFrac < 0.25) {
+      if (this.pPhase[i] === TDE_STREAM_CIRCULARIZING) {
+        // Shock heated state: intense white-gold glow
+        _scratchTdeColor.setRGB(
+          1.0,
+          0.92,
+          0.70
+        );
+      } else if (lifeFrac < 0.25) {
         // High-energy initial state: white-hot boost
         _scratchTdeColor.setRGB(
           Math.min(1.0, baseR * 1.3 + 0.3),
@@ -650,6 +741,9 @@ export class TDEStreamManager {
     this.pAges.fill(0);
     this.pMasses.fill(0);
     this.pPrevH.fill(0);
+    this.pPhase.fill(0);
+    this.pCircTimers.fill(0);
+    this.pImpactRadii.fill(0);
     this.activeCount = 0;
     _scratchTdeDummy.position.set(0, -99999, 0);
     _scratchTdeDummy.scale.set(0.0001, 0.0001, 0.0001);

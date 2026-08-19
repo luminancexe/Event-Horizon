@@ -362,12 +362,23 @@ export function updateInfoPanel() {
     $('info-distance').textContent = (bh.mesh.position.length() / 10).toFixed(2) + ' AU';
     $('info-velocity').textContent = (bh.velocity.length() / C_SIM).toFixed(2) + 'c';
     $('info-orbit').textContent = `${spinStr} | i: ${inclinationDeg.toFixed(0)}\u00b0`;
+    let circCount = 0;
+    if (state.tdeManager) {
+      for (let i = 0; i < state.tdeManager.capacity; i++) {
+        if (state.tdeManager.pAlive[i] && state.tdeManager.pPhase[i] === 1 && state.tdeManager.pBHIndex[i] === bh.id) {
+          circCount++;
+        }
+      }
+    }
+    const tempStr = bh.diskTemperature > 0 ? ` | T: ${(bh.diskTemperature / 1e6).toFixed(2)} MK` : '';
+    const circStr = circCount > 0 ? ` | CIRC: ${circCount} pkts` : '';
+
     $('info-temp').textContent =
       bh.bhClass === 'primordial'
         ? 'HAWKING EMISSION'
         : bh.diskMat
-        ? (bh.diskMass > 0
-            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | Ṁ: ${bh.accretionRate.toFixed(2)} M☉/s)`
+        ? (bh.diskMass > 0 || circCount > 0
+            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | Ṁ: ${bh.accretionRate.toFixed(2)} M☉/s${tempStr}${circStr})`
             : (CONFIG.dopplerBeamingEnabled ? `ACCRETION | DOPPLER i=${inclinationDeg.toFixed(0)}\u00b0` : 'ACCRETION (DOPPLER OFF)'))
         : 'INACTIVE';
     $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';
