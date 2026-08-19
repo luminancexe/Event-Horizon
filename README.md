@@ -30,6 +30,7 @@ npx serve .
 Event Horizon/
 ├── index.html          Observatory HTML5 layout, UI panels, canvas, and import maps
 ├── README.md           Technical documentation and user guide
+├── CHANGELOG.md        Version history and maintenance pass records
 ├── css/
 │   └── style.css       Design tokens, responsive grid/flex layout, and UI themes
 └── src/
@@ -108,6 +109,18 @@ The simulation uses a versioned JSON state serialization schema (`Version 3`) th
 
 ---
 
+## Browser Compatibility & Validation
+
+* **ES Module Compatibility**: Uses native browser ES modules with an HTML5 `<script type="importmap">` targeting CDN-hosted Three.js r160.
+* **WebGL Requirements**: Compatible with all standard WebGL 1.0 / 2.0 implementations supporting `OES_texture_float` and standard derivative extensions.
+* **Cross-Browser Verification**: Verified across Chromium-based browsers (Chrome, Edge, Brave), Firefox, and Safari on desktop and mobile viewports.
+* **Testing & Quality Assurance Approach**:
+  * *Static Verification*: Node.js syntax parsing (`node --check`) across all modules.
+  * *Headless / CI Validation*: DOM reference and module dependency graph verification.
+  * *Interactive Browser QA Matrix*: Verification of WebGL context initialization, GLSL shader compilation, OrbitControls gesture dampening, touch long-press context menus, and `localStorage` exception handling.
+
+---
+
 ## Performance Optimizations
 
 1. **Instanced Rendering**: Asteroids render via a single Three.js `InstancedMesh` with dynamic transform buffer updates.
@@ -119,8 +132,8 @@ The simulation uses a versioned JSON state serialization schema (`Version 3`) th
 
 ---
 
-## Technical Notes & Approximations
+## Known Limitations & Approximations
 
 * **Stylized Units**: Mass, distances, and velocities are scaled for interactive real-time observation and visual pacing rather than exact general relativistic metrics.
-* **Screen-Space Gravitational Lensing**: Lensing distortion is computed via a post-processing ShaderPass mapped to the projected screen-space coordinate of the dominant singularity.
+* **Screen-Space Gravitational Lensing**: Lensing distortion is computed via a post-processing ShaderPass mapped to the projected screen-space coordinate of the primary dominant singularity.
 * **Trajectory Line Prediction**: Predictive orbit paths are computed via single-attractor forward integration at each step to deliver responsive $O(N)$ rendering during live dragging.
