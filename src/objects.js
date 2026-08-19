@@ -24,6 +24,12 @@ import {
 import { scene, createDiskMaterial } from './scene.js';
 import { makeGlowTexture, makeRingTexture, starGlowTex } from './textures.js';
 import { registerSelectable } from './selection.js';
+import {
+  computeBZEfficiency,
+  computeBZJetPower,
+  computeHorizonAngularVelocity,
+  computeRelativisticVelocity,
+} from './jets.js';
 
 /* ============================================================================
    ORBITAL TRAIL BUFFER SYSTEM
@@ -972,6 +978,51 @@ export class BlackHole extends CelestialBody {
    */
   get angularMomentum() {
     return this.angularMomentumSim;
+  }
+
+  /**
+   * Kerr event horizon angular velocity in simulation units (rad/s):
+   *   Omega_H = (a * c) / (2 * r_H)
+   * @returns {number}
+   */
+  get horizonAngularVelocity() {
+    return computeHorizonAngularVelocity(this.spin, this.mass);
+  }
+
+  /**
+   * Dimensionless Blandford–Znajek (1977) rotational energy extraction efficiency:
+   *   eta_BZ = k_BZ * [ a / (1 + sqrt(1 - a^2)) ]^2
+   * @returns {number}
+   */
+  get bzEfficiency() {
+    return computeBZEfficiency(this.spin, CONFIG.jetBZEfficiency);
+  }
+
+  /**
+   * Collimated Blandford–Znajek jet power in simulation luminosity units:
+   *   P_BZ = eta_BZ * M_dot_eff * c^2
+   * @returns {number}
+   */
+  get jetPower() {
+    if (!CONFIG.jetEnabled) return 0.0;
+    const mDot = CONFIG.tdeEddingtonLimitEnabled ? this.effectiveAccretionRate : this.accretionRate;
+    return computeBZJetPower(this.spin, this.mass, mDot, CONFIG.jetBZEfficiency);
+  }
+
+  /**
+   * Relativistic bulk Lorentz factor Gamma for polar jet outflow:
+   * @returns {number}
+   */
+  get jetLorentzFactor() {
+    return CONFIG.jetLorentzFactor || 3.0;
+  }
+
+  /**
+   * Relativistic dimensionless jet velocity beta = v / c:
+   * @returns {number}
+   */
+  get jetRelativisticBeta() {
+    return computeRelativisticVelocity(this.jetLorentzFactor);
   }
 
   /**

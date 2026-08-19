@@ -33,6 +33,13 @@ export const CONFIG = {
   tdeEddingtonFeedbackStrength: 1.0,// Multiplier for radiation pressure feedback force (0.0 - 2.0)
   diskSpectralMappingEnabled: true,  // Analytical blackbody / Planckian locus continuous spectral color mapping
   diskRelativisticBoost: 1.0,        // Scaling multiplier for relativistic Doppler & gravitational redshift (0.0 - 2.0)
+  jetEnabled: true,                  // Relativistic polar jets & Blandford-Znajek rotational energy extraction switch
+  jetLorentzFactor: 3.0,             // Relativistic bulk Lorentz factor Gamma (1.1 - 10.0, default 3.0 -> v ≈ 0.943c)
+  jetBZEfficiency: 0.50,             // Dimensionless Blandford-Znajek magnetic coupling constant k_BZ (0.0 - 1.0)
+  jetOpeningAngle: 5.0,              // Polar jet half-opening angle (degrees, 1.0 - 25.0)
+  jetCollimationStrength: 0.65,      // Magnetic collimation power-law exponent (parabolic to conical)
+  jetSynchrotronBrightness: 1.5,     // Multiplier for jet synchrotron emissive shader intensity
+  jetDopplerBoosting: true,          // Relativistic Doppler beaming amplification (delta^3.7) on polar jets
   gravityEnabled: true,      // Master gravitational interaction switch (A/B performance testing)
   frameDragging: true,       // Kerr-inspired Lense-Thirring frame-dragging acceleration switch
   timeDilationEnabled: true, // Relativistic gravitational and kinematic time dilation switch
@@ -190,10 +197,12 @@ export const state = {
   // Tidal disruption debris fragments & continuous plasma streams
   fragments: [],
   tdeManager: null,
+  jetManager: null,
   activeTdeCount: 0,
   tdeEjectaMass: 0,
   tdeTotalAccretedMass: 0,
   tdeTotalRadiatedMass: 0,
+  tdeTotalJetMass: 0,
 
   // Camera animation and kinematic state
   cameraMode: 'free',

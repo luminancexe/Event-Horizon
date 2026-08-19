@@ -62,8 +62,9 @@ export function updateDebugHud() {
     }
     const diskStr = totalDiskMass > 0 ? ` | M_disk: ${totalDiskMass.toFixed(1)} M☉` : '';
     const radStr = (state.tdeTotalRadiatedMass || 0) > 0 ? ` | M_rad: ${state.tdeTotalRadiatedMass.toFixed(2)} M☉` : '';
+    const jetStr = (state.tdeTotalJetMass || 0) > 0 ? ` | M_jet: ${state.tdeTotalJetMass.toFixed(2)} M☉` : '';
     const circStr = circCount > 0 ? ` [${circCount} circ]` : '';
-    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)${circStr}${diskStr}${radStr}`;
+    elDbgTde.textContent = `${state.tdeManager.activeCount} / 1600 (${state.activeTdeCount || 0} active)${circStr}${diskStr}${radStr}${jetStr}`;
   }
   $('dbg-speed').textContent = CONFIG.paused ? 'PAUSED' : CONFIG.timeScale + 'x';
   $('dbg-substeps').textContent = state.lastSubsteps;

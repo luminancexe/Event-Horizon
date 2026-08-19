@@ -380,12 +380,20 @@ export function updateInfoPanel() {
     const tempStr = bh.diskTemperature > 0 ? ` | T_peak: ${(bh.diskTemperature / 1e6).toFixed(2)} MK` : '';
     const circStr = circCount > 0 ? ` | CIRC: ${circCount} pkts` : '';
 
+    const jetPower = bh.jetPower ?? 0;
+    const gammaVal = bh.jetLorentzFactor || 3.0;
+    const betaVal = bh.jetRelativisticBeta || 0.943;
+    const etaBZVal = bh.bzEfficiency ?? 0;
+    const jetStr = (CONFIG.jetEnabled && jetPower > 0)
+      ? ` | JET: ${(jetPower / 1e4).toFixed(1)}e4 (Γ=${gammaVal.toFixed(1)}, η_BZ=${(etaBZVal * 100).toFixed(1)}%)`
+      : '';
+
     $('info-temp').textContent =
       bh.bhClass === 'primordial'
         ? 'HAWKING EMISSION'
         : bh.diskMat
         ? (bh.diskMass > 0 || circCount > 0
-            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | ${mDotStr}${etaStr}${eddStr}${tempStr}${circStr})`
+            ? `ACCRETING (M_disk: ${bh.diskMass.toFixed(2)} M☉ | ${mDotStr}${etaStr}${eddStr}${tempStr}${circStr}${jetStr})`
             : (CONFIG.dopplerBeamingEnabled ? `ACCRETION | DOPPLER i=${inclinationDeg.toFixed(0)}\u00b0` : 'ACCRETION (DOPPLER OFF)'))
         : 'INACTIVE';
     $('info-age').textContent = Math.floor(bh.age).toLocaleString() + ' yrs';
@@ -397,10 +405,11 @@ export function updateInfoPanel() {
       : `\u03b8_E: ${thetaDeg.toFixed(2)}\u00b0`;
     const lensLabel = CONFIG.lensingEnabled ? `LENS: ACTIVE (${CONFIG.lensStrength.toFixed(1)}\u00d7)` : 'LENS: OFF';
     const dopplerLabel = CONFIG.dopplerBeamingEnabled ? 'DOPPLER: ON' : 'DOPPLER: OFF';
+    const jetStatusLabel = CONFIG.jetEnabled ? (jetPower > 0 ? 'JET: ACTIVE (BZ)' : 'JET: READY') : 'JET: OFF';
     $('info-status').textContent =
       bh.rotationModel === 'kerr'
-        ? `${CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED'} | ${lensLabel} | ${dopplerLabel}`
-        : `STATIC | ${lensLabel} | ${dopplerLabel}`;
+        ? `${CONFIG.frameDragging ? 'FRAME DRAG: ACTIVE' : 'FRAME DRAG: PAUSED'} | ${lensLabel} | ${dopplerLabel} | ${jetStatusLabel}`
+        : `STATIC | ${lensLabel} | ${dopplerLabel} | ${jetStatusLabel}`;
     positionSelectionVisuals(bh.mesh.position, bh.velocity, bh.visualRadius * 2.6, null);
     return;
   }

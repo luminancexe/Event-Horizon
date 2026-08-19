@@ -19,6 +19,7 @@ import { createBlackHole, createNeutronStar, computeTimeDilation, blackHoles, bh
 import { computeTotalAcceleration } from './physics.js';
 import { spawnAsteroid } from './asteroids.js';
 import { unregisterSelectable, deselect } from './selection.js';
+import { computeBZSpinTorque } from './jets.js';
 
 /* ============================================================================
    ACCRETION DISK BURSTS & RELATIVISTIC ENERGY RINGS
@@ -722,10 +723,12 @@ export class TDEStreamManager {
 
   /**
    * Advances relativistic viscous accretion flow from disk reservoirs into black hole singularities.
-   * Couples mass-energy inflow, radiative loss, and Bardeen (1970) Kerr spin torque:
-   *   dM_rad = eta * dM0
-   *   dM_BH = (1 - eta) * dM0
-   *   da = ((L_ISCO - 2 * a * E_ISCO) / M_BH) * dM0
+   * Couples mass-energy inflow, radiative loss, Blandford–Znajek (1977) rotational energy extraction,
+   * and coupled Bardeen (1970) accretion + BZ magnetic spin torque:
+   *   dM_rad = eta_disk * dM0
+   *   dM_jet = eta_BZ * dM0 (energy equivalent E_jet / c^2)
+   *   dM_BH = (1 - eta_disk - eta_BZ) * dM0
+   *   da = da_acc - da_BZ
    *
    * @param {number} dt - Timestep in simulation seconds.
    */
@@ -739,16 +742,22 @@ export class TDEStreamManager {
           if (CONFIG.tdeSpinEvolutionEnabled) {
             const props = computeKerrISCOProperties(bh.spin, bh.mass);
             const eta = props.eta;
+            const etaBZ = (CONFIG.jetEnabled && typeof bh.bzEfficiency === 'number') ? bh.bzEfficiency : 0.0;
             const dM_rad = eta * dM0;
-            const dM_BH = (1 - eta) * dM0;
+            const dM_jet = etaBZ * dM0;
+            const dM_BH = (1.0 - eta - etaBZ) * dM0;
 
-            // Evolve Kerr spin via Bardeen (1970) torque relation
-            const da = ((props.lISCO - 2 * (bh.spin ?? 0) * props.eISCO) / Math.max(bh.mass, 0.1)) * dM0;
-            bh.spin = THREE.MathUtils.clamp((bh.spin ?? 0) + da, -0.998, 0.998);
+            // Evolve Kerr spin via coupled Bardeen accretion + BZ magnetic braking
+            const a = bh.spin ?? 0;
+            const da_acc = ((props.lISCO - 2 * a * props.eISCO) / Math.max(bh.mass, 0.1)) * (1.0 - eta) * dM0;
+            const da_BZ = CONFIG.jetEnabled ? computeBZSpinTorque(a, bh.mass, etaBZ, dM0) : 0.0;
+            const da = da_acc - da_BZ;
+            bh.spin = THREE.MathUtils.clamp(a + da, -0.998, 0.998);
 
             bh.diskMass = Math.max(0, bh.diskMass - dM0);
             bh.mass += dM_BH;
             state.tdeTotalRadiatedMass = (state.tdeTotalRadiatedMass || 0) + dM_rad;
+            state.tdeTotalJetMass = (state.tdeTotalJetMass || 0) + dM_jet;
             state.tdeTotalAccretedMass = (state.tdeTotalAccretedMass || 0) + dM_BH;
           } else {
             bh.diskMass = Math.max(0, bh.diskMass - dM0);

@@ -41,6 +41,7 @@ export function clearUniverse() {
   for (const b of [...state.bodies]) destroyObject(b);
   clearFragments();
   state.tdeManager?.clear();
+  state.jetManager?.clear();
   initAsteroids(0);
   deselect();
   state.followTarget = null;
@@ -168,6 +169,7 @@ export function serializeUniverse() {
     tdeEjectaMass: state.tdeEjectaMass ?? 0,
     tdeTotalAccretedMass: state.tdeTotalAccretedMass ?? 0,
     tdeTotalRadiatedMass: state.tdeTotalRadiatedMass ?? 0,
+    tdeTotalJetMass: state.tdeTotalJetMass ?? 0,
     cameraMode: state.cameraMode,
     cameraPosition: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
     cameraTarget: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
@@ -293,6 +295,11 @@ const CONFIG_BOUNDS = {
   tdeMaxCircularizationTime: [0.5, 20.0],
   tdeEddingtonFeedbackStrength: [0.0, 2.0],
   diskRelativisticBoost: [0.0, 2.0],
+  jetLorentzFactor: [1.1, 10.0],
+  jetBZEfficiency: [0.0, 1.0],
+  jetOpeningAngle: [1.0, 25.0],
+  jetCollimationStrength: [0.1, 1.5],
+  jetSynchrotronBrightness: [0.1, 5.0],
 };
 
 /**
@@ -330,6 +337,7 @@ export function deserializeUniverse(data) {
   state.tdeEjectaMass = data.tdeEjectaMass || 0;
   state.tdeTotalAccretedMass = data.tdeTotalAccretedMass || 0;
   state.tdeTotalRadiatedMass = data.tdeTotalRadiatedMass || 0;
+  state.tdeTotalJetMass = data.tdeTotalJetMass || 0;
 
   // Phase 1: Recreate celestial bodies (prioritizing black holes for gravitational stability)
   const rawBodies = data.bodies || [];

@@ -40,6 +40,7 @@ import {
   checkBodyCollisions,
 } from './physics.js';
 import { updateFragments, updateStarLifecycle, TDEStreamManager } from './effects.js';
+import { RelativisticJetManager } from './jets.js';
 import { updateInfoPanel, selectionRing, velocityArrow, influenceSphere } from './selection.js';
 import { updateDebugHud, updateDebugOverlays } from './ui.js';
 import { logEvent, fmtClock } from './events.js';
@@ -63,6 +64,7 @@ createBlackHole({
 
 initAsteroids(CONFIG.asteroidCount);
 state.tdeManager = new TDEStreamManager();
+state.jetManager = new RelativisticJetManager();
 
 for (let i = 0; i < 5; i++) createStar();
 
@@ -178,6 +180,7 @@ function animate() {
       updateFragments(subDtAst);
       state.tdeManager?.update(subDtAst);
       state.tdeManager?.updateViscousAccretion(subDtAst);
+      state.jetManager?.update(subDtAst);
       asteroidMs += performance.now() - t0;
     }
 
