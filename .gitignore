@@ -1,0 +1,9 @@
+# Phase documentation and audit text files
+/phases/
+*.txt
+
+# System and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
