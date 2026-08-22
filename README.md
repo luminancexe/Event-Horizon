@@ -33,22 +33,28 @@ Event Horizon/
 ├── CHANGELOG.md        Version history and maintenance pass records
 ├── css/
 │   └── style.css       Design tokens, responsive grid/flex layout, and UI themes
-└── src/
-    ├── main.js         Application bootstrap, initial population, and animation loop
-    ├── state.js        Global simulation parameters (CONFIG), constants, and shared state
-    ├── scene.js        Three.js WebGL renderer, perspective camera, lights, and shaders
-    ├── camera.js       Camera tracking modes (free/follow/orbit), tweens, and camera shake
-    ├── objects.js      CelestialBody class hierarchy, factories, and orbital trail buffers
-    ├── asteroids.js    Instanced asteroid particle field, spatial hashing, and collisions
-    ├── physics.js      N-body gravity, Velocity Verlet integrator, and celestial collisions
-    ├── effects.js      Accretion disk reactivity, TDE streams, and supernova lifecycles
-    ├── jets.js         Relativistic polar jets, Blandford–Znajek physics, and GPU particle pool
-    ├── selection.js    Raycasting selection, Hill sphere calculations, and inspector telemetry
-    ├── creation.js     Pointer interaction, drag-to-aim launch vectors, and context menus
-    ├── events.js       Chronological event logging with coordinate jump links and toasts
-    ├── ui.js           Physics telemetry HUD, debug overlays, and object browser tree
-    ├── textures.js     Procedural canvas texture generators for glows and rings
-    └── saveload.js     Schema Version 5 state serialization, two-phase loading, and universe generation
+├── src/
+│   ├── main.js         Application bootstrap, initial population, and animation loop
+│   ├── state.js        Global simulation parameters (CONFIG), constants, and shared state
+│   ├── scene.js        Three.js WebGL renderer, perspective camera, lights, and shaders
+│   ├── camera.js       Camera tracking modes (free/follow/orbit), tweens, and camera shake
+│   ├── objects.js      CelestialBody class hierarchy, factories, and orbital trail buffers
+│   ├── asteroids.js    Instanced asteroid particle field, spatial hashing, and collisions
+│   ├── physics.js      N-body gravity, Velocity Verlet integrator, and celestial collisions
+│   ├── effects.js      Accretion disk reactivity, TDE streams, and supernova lifecycles
+│   ├── jets.js         Relativistic polar jets, Blandford–Znajek physics, and GPU particle pool
+│   ├── selection.js    Raycasting selection, Hill sphere calculations, and inspector telemetry
+│   ├── creation.js     Pointer interaction, drag-to-aim launch vectors, and context menus
+│   ├── events.js       Chronological event logging with coordinate jump links and toasts
+│   ├── ui.js           Physics telemetry HUD, debug overlays, and object browser tree
+│   ├── textures.js     Procedural canvas texture generators for glows and rings
+│   └── saveload.js     Schema Version 5 state serialization, two-phase loading, and universe generation
+└── tests/
+    ├── test_step6.mjs   Continuous tidal disruption and stream integration tests
+    ├── test_step7.mjs   Scientific visualization diagnostic overlay test suite
+    ├── test_step8.mjs   Mass classification & Kerr spin parameter test suite
+    ├── test_step9.mjs   Binary black hole coalescence & gravitational wave tests
+    └── test_step10.mjs  Blandford–Znajek relativistic jets & conservation invariant tests
 ```
 
 ---
